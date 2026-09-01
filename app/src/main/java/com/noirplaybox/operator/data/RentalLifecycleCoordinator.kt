@@ -6,12 +6,10 @@ import com.noirplaybox.operator.model.LifecycleActionResult
 import com.noirplaybox.operator.model.PreparingRuntime
 import com.noirplaybox.operator.model.RentalPackage
 import com.noirplaybox.operator.model.ShutdownRuntime
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 
 /**
  * Orchestrator lifecycle. Urutan safety mengikuti web production:
- * - PREPARING: hardware ON + Firebase PREPARING paralel dengan rollback.
+ * - PREPARING: hardware wajib ON dan terverifikasi dulu, baru backend PREPARING dibuat.
  * - START RENTAL: hardware timer dulu, Firebase session kemudian; bila Firebase
  *   gagal, hardware STOP ditunggu.
  * - ADD TIME: Firebase lebih dulu; hardware sync boleh gagal sebagai warning.
@@ -23,29 +21,30 @@ class RentalLifecycleCoordinator(
     private val backend: RentalLifecycleRepository,
     private val hardware: HardwareController
 ) {
-    suspend fun prepare(deviceId: String): Pair<PreparingRuntime, LifecycleActionResult> = coroutineScope {
-        val hardwareJob = async { capture { hardware.monitorOn(deviceId) } }
-        val preparingJob = async { capture { backend.startPreparing(deviceId) } }
+    suspend fun prepare(deviceId: String): Pair<PreparingRuntime, LifecycleActionResult> {
+        // Safety invariant: jangan pernah mencatat PREPARING sebelum hardware benar-benar siap.
+        hardware.monitorOn(deviceId)
 
-        val hardwareResult = hardwareJob.await()
-        val preparingResult = preparingJob.await()
+        val snapshot = hardware.readAll(listOf(deviceId))[deviceId.trim().uppercase()]
+            ?: throw IllegalStateException("Status hardware $deviceId tidak tersedia setelah command ON.")
 
-        if (hardwareResult.isFailure) {
-            if (preparingResult.isSuccess) {
-                runCatchingSuspend { backend.endPreparing(preparingResult.getOrThrow().id) }
-            }
-            throw hardwareResult.exceptionOrNull()
-                ?: IllegalStateException("Monitor gagal dinyalakan.")
-        }
-
-        if (preparingResult.isFailure) {
+        if (!snapshot.online || snapshot.switchOn != true) {
             runCatchingSuspend { hardware.monitorStop(deviceId) }
-            throw preparingResult.exceptionOrNull()
-                ?: IllegalStateException("PREPARING gagal dibuat.")
+            throw IllegalStateException(
+                snapshot.error ?: "$deviceId belum terkonfirmasi online dan ON. PREPARING tidak dibuat."
+            )
         }
 
-        preparingResult.getOrThrow() to LifecycleActionResult(
-            message = "PREPARING aktif. Pilih paket saat unit siap."
+        val preparing = try {
+            backend.startPreparing(deviceId)
+        } catch (error: Throwable) {
+            // Backend gagal setelah hardware ON: rollback relay agar tidak ada penggunaan tanpa lifecycle.
+            runCatchingSuspend { hardware.monitorStop(deviceId) }
+            throw error
+        }
+
+        return preparing to LifecycleActionResult(
+            message = "PREPARING aktif. Hardware sudah online dan terkonfirmasi ON."
         )
     }
 
@@ -53,10 +52,17 @@ class RentalLifecycleCoordinator(
         deviceId: String,
         preparingId: String
     ): LifecycleActionResult {
-        // Sama seperti web: monitor dimatikan lebih dulu, lalu PREPARING ditutup.
-        hardware.monitorStop(deviceId)
+        // PREPARING harus selalu ditutup walaupun hardware sedang offline/tidak merespons.
+        val hardwareStop = runCatchingSuspend { hardware.monitorStop(deviceId) }
         backend.endPreparing(preparingId)
-        return LifecycleActionResult("PREPARING dibatalkan. Monitor telah dimatikan.")
+        return LifecycleActionResult(
+            message = "PREPARING dibatalkan.",
+            warning = if (hardwareStop.isFailure) {
+                "Record PREPARING sudah ditutup, tetapi monitor tidak dapat dikonfirmasi OFF karena device offline/tidak merespons."
+            } else {
+                null
+            }
+        )
     }
 
     suspend fun startRental(
@@ -64,7 +70,27 @@ class RentalLifecycleCoordinator(
         preparingId: String?,
         rentalPackage: RentalPackage
     ): LifecycleActionResult {
+        require(!preparingId.isNullOrBlank()) {
+            "Rental hanya dapat dimulai dari PREPARING yang valid."
+        }
+
+        // Hardware-first: session billing tidak boleh dibuat sebelum relay benar-benar siap.
         hardware.startRentalTimer(deviceId, rentalPackage.durationMinutes)
+
+        val snapshot = hardware.readAll(listOf(deviceId))[deviceId.trim().uppercase()]
+            ?: run {
+                runCatchingSuspend { hardware.monitorStop(deviceId) }
+                throw IllegalStateException(
+                    "Status hardware $deviceId tidak tersedia setelah timer rental dikirim. Billing belum dibuat."
+                )
+            }
+
+        if (!snapshot.online || snapshot.switchOn != true) {
+            runCatchingSuspend { hardware.monitorStop(deviceId) }
+            throw IllegalStateException(
+                snapshot.error ?: "$deviceId belum terkonfirmasi online dan ON. Billing belum dibuat."
+            )
+        }
 
         try {
             backend.createSession(
@@ -83,7 +109,7 @@ class RentalLifecycleCoordinator(
         }
 
         return LifecycleActionResult(
-            message = "Billing ${rentalPackage.label} berhasil dimulai."
+            message = "Rental ${rentalPackage.label} aktif. Hardware terverifikasi ON dan billing berhasil dibuat."
         )
     }
 
@@ -164,11 +190,23 @@ class RentalLifecycleCoordinator(
         deviceId: String,
         shutdownId: String
     ): LifecycleActionResult {
-        // Web menutup audit hanya setelah monitor berhasil dimatikan.
+        // Jangan pernah mengembalikan unit ke READY sebelum relay benar-benar OFF.
         hardware.monitorStop(deviceId)
+
+        val snapshot = hardware.readAll(listOf(deviceId))[deviceId.trim().uppercase()]
+            ?: throw IllegalStateException(
+                "Status hardware $deviceId tidak tersedia setelah command OFF. Shutdown belum diselesaikan."
+            )
+
+        if (snapshot.switchOn == true) {
+            throw IllegalStateException(
+                snapshot.error ?: "$deviceId masih terdeteksi ON. Shutdown belum diselesaikan dan unit belum READY."
+            )
+        }
+
         backend.completeShutdown(shutdownId)
         return LifecycleActionResult(
-            "Shutdown selesai. Monitor OFF dan kabel power utama dapat dicabut."
+            "Shutdown selesai. Hardware terverifikasi OFF dan unit kembali READY."
         )
     }
 

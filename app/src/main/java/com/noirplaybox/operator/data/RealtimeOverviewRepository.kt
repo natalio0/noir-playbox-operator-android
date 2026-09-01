@@ -45,6 +45,38 @@ class RealtimeOverviewRepository(
         }
     }
 
+
+    suspend fun refreshHardwareOnly(
+        previous: List<PlayboxDevice>
+    ): List<PlayboxDevice> = coroutineScope {
+        if (previous.isEmpty()) return@coroutineScope previous
+
+        val ids = previous.map { it.id }
+        val hardware = hardwareController.readFast(ids)
+
+        previous.map { device ->
+            val snapshot = hardware[device.id] ?: device.hardware
+            val state = when {
+                device.session != null -> DeviceState.ACTIVE
+                device.shutdown != null -> DeviceState.SHUTDOWN
+                device.preparing != null -> DeviceState.PREPARING
+                snapshot?.status == HardwareStatus.OFFLINE -> DeviceState.OFFLINE
+                else -> DeviceState.READY
+            }
+
+            device.copy(
+                state = state,
+                connected = snapshot?.online == true,
+                connectionLabel = when (snapshot?.transport) {
+                    com.noirplaybox.operator.model.HardwareTransport.LOCAL_TINYTUYA -> "TinyTuya LAN"
+                    com.noirplaybox.operator.model.HardwareTransport.TRANSITIONAL_TUYA_CLOUD -> "Tuya Cloud · transition"
+                    null -> device.connectionLabel
+                },
+                hardware = snapshot
+            )
+        }
+    }
+
     private fun merge(
         registered: RegistryDevice,
         runtime: BusinessRuntime,

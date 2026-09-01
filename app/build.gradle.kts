@@ -19,8 +19,8 @@ android {
         applicationId = "com.noirplaybox.operator"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 38
+        versionName = "3.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -39,7 +39,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("boolean", "LOG_VERBOSE", "true")
+            buildConfigField("String", "APP_ENVIRONMENT", "\"debug\"")
+        }
         release {
+            buildConfigField("boolean", "LOG_VERBOSE", "false")
+            buildConfigField("String", "APP_ENVIRONMENT", "\"production\"")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -87,6 +93,7 @@ chaquopy {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.compose.ui:ui:1.7.8")

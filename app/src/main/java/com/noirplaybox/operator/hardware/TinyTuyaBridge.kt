@@ -1,11 +1,20 @@
 package com.noirplaybox.operator.hardware
 
 import android.content.Context
+import android.net.wifi.WifiManager
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
+
+data class TinyTuyaDiscoveredDevice(
+    val id: String,
+    val ipAddress: String,
+    val protocolVersion: String,
+    val name: String
+)
 
 data class TinyTuyaPilotResult(
     val ok: Boolean,
@@ -26,11 +35,59 @@ class TinyTuyaBridge(
         call("library_info")
     }
 
+    suspend fun scan(seconds: Int = 12): Result<List<TinyTuyaDiscoveredDevice>> = withContext(Dispatchers.IO) {
+        val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        val multicastLock = wifi?.createMulticastLock("noir-tinytuya-scan")?.apply { setReferenceCounted(false) }
+        try {
+            multicastLock?.acquire()
+            runCatching {
+                val root = JSONObject(call("scan_json", seconds))
+                if (!root.optBoolean("ok", false)) {
+                    kotlin.error(root.optString("error").ifBlank { "Scan TinyTuya gagal." })
+                }
+                val rows = root.optJSONArray("devices") ?: JSONArray()
+                buildList {
+                    for (index in 0 until rows.length()) {
+                        val item = rows.optJSONObject(index) ?: continue
+                        val id = item.optString("id").trim()
+                        val ip = item.optString("ip").trim()
+                        if (id.isBlank() || ip.isBlank()) continue
+                        add(
+                            TinyTuyaDiscoveredDevice(
+                                id = id,
+                                ipAddress = ip,
+                                protocolVersion = item.optString("version", "3.3").ifBlank { "3.3" },
+                                name = item.optString("name", "Tuya Device").ifBlank { "Tuya Device" }
+                            )
+                        )
+                    }
+                }
+            }
+        } finally {
+            if (multicastLock?.isHeld == true) multicastLock.release()
+        }
+    }
+
     suspend fun status(config: TinyTuyaLocalConfig): TinyTuyaPilotResult {
         return withContext(Dispatchers.IO) {
             parse(
                 call(
                     "status_json",
+                    config.tuyaDeviceId,
+                    config.ipAddress,
+                    config.localKey,
+                    config.protocolVersion,
+                    config.switchDps
+                )
+            )
+        }
+    }
+
+    suspend fun statusFast(config: TinyTuyaLocalConfig): TinyTuyaPilotResult {
+        return withContext(Dispatchers.IO) {
+            parse(
+                call(
+                    "status_fast_json",
                     config.tuyaDeviceId,
                     config.ipAddress,
                     config.localKey,

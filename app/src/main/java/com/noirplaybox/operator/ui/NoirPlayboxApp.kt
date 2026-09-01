@@ -1,16 +1,36 @@
 package com.noirplaybox.operator.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
+import com.noirplaybox.operator.R
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.noirplaybox.operator.data.BackendRuntimeRepository
 import com.noirplaybox.operator.data.FirebaseOperationalRepository
 import com.noirplaybox.operator.data.NoirApiClient
+import com.noirplaybox.operator.data.OverviewCacheStore
+import com.noirplaybox.operator.data.OperatorTelemetryRepository
 import com.noirplaybox.operator.data.RealtimeOverviewRepository
 import com.noirplaybox.operator.data.RentalLifecycleCoordinator
 import com.noirplaybox.operator.data.RentalLifecycleRepository
@@ -23,8 +43,11 @@ import com.noirplaybox.operator.model.PlayboxDevice
 import com.noirplaybox.operator.model.RentalPackage
 import com.noirplaybox.operator.ui.screens.DashboardScreen
 import com.noirplaybox.operator.ui.screens.DeviceDetailScreen
+import com.noirplaybox.operator.ui.screens.DeviceSetupScreen
+import com.noirplaybox.operator.ui.screens.ProfileScreen
 import com.noirplaybox.operator.ui.screens.LoginScreen
 import com.noirplaybox.operator.util.NoirServerClock
+import com.noirplaybox.operator.util.friendlyError
 import com.noirplaybox.operator.ui.screens.TinyTuyaPilotScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -35,6 +58,7 @@ import java.util.Date
 import java.util.Locale
 
 private sealed interface Screen {
+    data object Boot : Screen
     data object Login : Screen
     data object Dashboard : Screen
     data class DeviceDetail(val deviceId: String) : Screen
@@ -42,7 +66,9 @@ private sealed interface Screen {
 }
 
 private const val BUSINESS_REFRESH_MS = 15_000L
+private const val LOCAL_HARDWARE_POLL_MS = 3_500L
 private const val TRANSITIONAL_CLOUD_HARDWARE_REFRESH_MS = 15 * 60_000L
+private const val OFFLINE_WATCHDOG_THRESHOLD = 2
 
 @Composable
 fun NoirPlayboxApp() {
@@ -53,7 +79,12 @@ fun NoirPlayboxApp() {
         FirebaseOperationalRepository(context.applicationContext)
     }
 
+    val overviewCache = remember(context) {
+        OverviewCacheStore(context.applicationContext)
+    }
+
     val api = remember { NoirApiClient() }
+    val telemetry = remember { OperatorTelemetryRepository(api) }
 
     // V5 Local Fleet:
     // device dengan encrypted TinyTuya config -> LAN local
@@ -80,9 +111,14 @@ fun NoirPlayboxApp() {
         )
     }
     val refreshMutex = remember { Mutex() }
+    val hardwareRefreshMutex = remember { Mutex() }
     val expiryInFlight = remember { mutableSetOf<String>() }
+    val actionInFlight = remember { mutableSetOf<String>() }
+    val offlineStreaks = remember { mutableMapOf<String, Int>() }
+    val reportedOfflineSessions = remember { mutableSetOf<String>() }
 
-    var screen by remember { mutableStateOf<Screen>(Screen.Login) }
+    var screen by remember { mutableStateOf<Screen>(Screen.Boot) }
+    var mainTab by remember { mutableStateOf(MainTab.DASHBOARD) }
     var session by remember { mutableStateOf<OperatorSession?>(null) }
     var devices by remember { mutableStateOf<List<PlayboxDevice>>(emptyList()) }
 
@@ -91,12 +127,44 @@ fun NoirPlayboxApp() {
     var loginError by remember { mutableStateOf<String?>(null) }
     var deviceLoading by remember { mutableStateOf(false) }
     var deviceError by remember { mutableStateOf<String?>(null) }
+    var watchdogAlert by remember { mutableStateOf<String?>(null) }
     var lastSyncedAt by remember { mutableStateOf<Long?>(null) }
 
     var detailActionLoading by remember { mutableStateOf(false) }
     var detailMessage by remember { mutableStateOf<String?>(null) }
     var detailWarning by remember { mutableStateOf<String?>(null) }
     var detailError by remember { mutableStateOf<String?>(null) }
+
+    fun canManageHardware(current: OperatorSession?): Boolean {
+        val role = current?.role?.trim()?.lowercase().orEmpty()
+        return role in setOf("operational", "admin", "super-admin", "super_admin")
+    }
+
+    suspend fun evaluateOfflineWatchdog(refreshed: List<PlayboxDevice>) {
+        var activeOfflineAlert: String? = null
+        refreshed.forEach { device ->
+            val active = device.session ?: run {
+                offlineStreaks.remove(device.id)
+                return@forEach
+            }
+            val offline = device.hardware?.online == false || device.hardware?.status == com.noirplaybox.operator.model.HardwareStatus.OFFLINE
+            if (!offline) {
+                offlineStreaks.remove(device.id)
+                return@forEach
+            }
+            val streak = (offlineStreaks[device.id] ?: 0) + 1
+            offlineStreaks[device.id] = streak
+            if (streak >= OFFLINE_WATCHDOG_THRESHOLD) {
+                val warning = "${device.id} offline saat rental aktif. Billing tetap berjalan sampai operator menyelesaikan rental."
+                activeOfflineAlert = warning
+                if ((screen as? Screen.DeviceDetail)?.deviceId == device.id) detailWarning = warning
+                if (reportedOfflineSessions.add(active.id)) {
+                    telemetry.incident("ACTIVE_DEVICE_OFFLINE", device.id, active.id, warning)
+                }
+            }
+        }
+        watchdogAlert = activeOfflineAlert
+    }
 
     suspend fun refreshOverviewNow(refreshHardware: Boolean) {
         refreshMutex.withLock {
@@ -108,9 +176,10 @@ fun NoirPlayboxApp() {
                     previous = devices,
                     refreshHardware = refreshHardware
                 )
+                session?.let { overviewCache.save(it.cafeId, devices) }
                 lastSyncedAt = System.currentTimeMillis()
             } catch (error: Throwable) {
-                deviceError = error.message ?: "Gagal memuat realtime overview."
+                deviceError = friendlyError(error)
                 if (screen is Screen.DeviceDetail) {
                     detailError = deviceError
                 }
@@ -120,32 +189,75 @@ fun NoirPlayboxApp() {
         }
     }
 
+    suspend fun refreshHardwareOnlyNow() {
+        if (devices.isEmpty()) return
+        hardwareRefreshMutex.withLock {
+            runCatching { overviewRepository.refreshHardwareOnly(devices) }
+                .onSuccess { refreshed ->
+                    devices = refreshed
+                    evaluateOfflineWatchdog(refreshed)
+                    session?.let { overviewCache.save(it.cafeId, devices) }
+                    lastSyncedAt = System.currentTimeMillis()
+                }
+                .onFailure { error ->
+                    // Fast LAN polling must not replace business data with an error screen.
+                    android.util.Log.w("NoirHardwarePoll", "Hardware refresh gagal", error)
+                }
+        }
+    }
+
     fun refreshOverview(refreshHardware: Boolean) {
         scope.launch { refreshOverviewNow(refreshHardware) }
     }
 
-    fun runDetailAction(block: suspend () -> LifecycleActionResult) {
-        if (detailActionLoading) return
+    fun refreshHardwareFast() {
+        scope.launch { refreshHardwareOnlyNow() }
+    }
+
+    fun runDetailAction(
+        action: String,
+        deviceId: String,
+        block: suspend () -> LifecycleActionResult
+    ) {
+        val key = "$deviceId:$action"
+        if (detailActionLoading || !actionInFlight.add(key)) return
 
         scope.launch {
             detailActionLoading = true
             detailError = null
             detailMessage = null
             detailWarning = null
+            telemetry.audit(action, deviceId, "STARTED")
 
             try {
                 val result = block()
                 detailMessage = result.message
                 detailWarning = result.warning
+                telemetry.audit(action, deviceId, "SUCCESS", result.message)
                 refreshOverviewNow(refreshHardware = true)
             } catch (error: Throwable) {
-                detailError = error.message ?: "Action gagal."
-                // Business state tetap direstore setelah error agar UI tidak menebak.
+                val friendly = friendlyError(error)
+                detailError = friendly
+                telemetry.audit(action, deviceId, "FAILED", friendly)
                 runCatching { refreshOverviewNow(refreshHardware = true) }
             } finally {
                 detailActionLoading = false
+                actionInFlight.remove(key)
             }
         }
+    }
+
+    val activity = context as? ComponentActivity
+    DisposableEffect(activity) {
+        if (activity == null) return@DisposableEffect onDispose { }
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && session != null && screen !is Screen.Login) {
+                refreshOverview(refreshHardware = false)
+                refreshHardwareFast()
+            }
+        }
+        activity.lifecycle.addObserver(observer)
+        onDispose { activity.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(authRepository.firebaseConfigured) {
@@ -153,6 +265,7 @@ fun NoirPlayboxApp() {
 
         if (!authRepository.firebaseConfigured) {
             bootChecked = true
+            screen = Screen.Login
             return@LaunchedEffect
         }
 
@@ -165,8 +278,17 @@ fun NoirPlayboxApp() {
                 .onSuccess { restored ->
                     if (restored != null) {
                         session = restored
+                        val cached = overviewCache.load(restored.cafeId)
+                        if (cached.isNotEmpty()) {
+                            devices = cached
+                        }
                         screen = Screen.Dashboard
-                        refreshOverview(refreshHardware = true)
+
+                        // Paint cached Home immediately, then reconcile business + hardware in background.
+                        refreshOverview(refreshHardware = false)
+                        refreshHardwareFast()
+                    } else {
+                        screen = Screen.Login
                     }
                 }
                 .onFailure {
@@ -192,6 +314,40 @@ fun NoirPlayboxApp() {
         while (true) {
             delay(TRANSITIONAL_CLOUD_HARDWARE_REFRESH_MS)
             refreshOverview(refreshHardware = true)
+        }
+    }
+
+    // Fast LAN presence polling while Home is selected. Business state stays on its
+    // own backend cadence; this loop only refreshes physical ON/OFF/OFFLINE state.
+    LaunchedEffect(session?.uid, screen, mainTab) {
+        if (session == null || screen !is Screen.Dashboard || mainTab != MainTab.DASHBOARD) {
+            return@LaunchedEffect
+        }
+
+        refreshHardwareOnlyNow()
+        while (true) {
+            delay(LOCAL_HARDWARE_POLL_MS)
+            refreshHardwareOnlyNow()
+        }
+    }
+
+    // Android system Back mengikuti hierarchy navigasi aplikasi.
+    // Root Home tetap memakai default system Back (keluar/minimize aplikasi).
+    BackHandler(
+        enabled = when (screen) {
+            is Screen.DeviceDetail, is Screen.TinyTuyaPilot -> true
+            Screen.Dashboard -> mainTab != MainTab.DASHBOARD
+            Screen.Boot, Screen.Login -> false
+        }
+    ) {
+        when (val current = screen) {
+            is Screen.TinyTuyaPilot -> screen = Screen.DeviceDetail(current.deviceId)
+            is Screen.DeviceDetail -> {
+                screen = Screen.Dashboard
+                mainTab = MainTab.DASHBOARD
+            }
+            Screen.Dashboard -> mainTab = MainTab.DASHBOARD
+            Screen.Boot, Screen.Login -> Unit
         }
     }
 
@@ -227,7 +383,7 @@ fun NoirPlayboxApp() {
                         detailWarning = result.warning
                         refreshOverviewNow(refreshHardware = true)
                     } catch (error: Throwable) {
-                        detailError = error.message ?: "Gagal auto-stop session expired."
+                        detailError = friendlyError(error)
                     } finally {
                         expiryInFlight.remove(active.id)
                     }
@@ -237,6 +393,10 @@ fun NoirPlayboxApp() {
     }
 
     when (val current = screen) {
+        Screen.Boot -> {
+            NoirBootScreen()
+        }
+
         Screen.Login -> {
             LoginScreen(
                 firebaseConfigured = authRepository.firebaseConfigured,
@@ -270,32 +430,72 @@ fun NoirPlayboxApp() {
                 return
             }
 
-            DashboardScreen(
-                session = activeSession,
-                devices = devices,
-                isLoading = deviceLoading,
-                error = deviceError,
-                lastSyncedText = formatLastSynced(lastSyncedAt),
-                onRefresh = { refreshOverview(refreshHardware = true) },
-                onDeviceClick = { device ->
-                    detailMessage = null
-                    detailWarning = null
-                    detailError = null
-                    screen = Screen.DeviceDetail(device.id)
-                },
-                onLogout = {
-                    authRepository.logout()
-                    session = null
-                    devices = emptyList()
-                    loginError = null
-                    deviceError = null
-                    detailMessage = null
-                    detailWarning = null
-                    detailError = null
-                    lastSyncedAt = null
-                    screen = Screen.Login
+            fun logout() {
+                authRepository.logout()
+                overviewCache.clear()
+                session = null
+                devices = emptyList()
+                loginError = null
+                deviceError = null
+                watchdogAlert = null
+                detailMessage = null
+                detailWarning = null
+                detailError = null
+                lastSyncedAt = null
+                mainTab = MainTab.DASHBOARD
+                screen = Screen.Login
+            }
+
+            Scaffold(
+                bottomBar = {
+                    AppBottomBar(
+                        selected = mainTab,
+                        allowDeviceSetup = canManageHardware(activeSession),
+                        onSelect = { requested ->
+                            mainTab = if (requested == MainTab.SETUP && !canManageHardware(activeSession)) MainTab.ACCOUNT else requested
+                        }
+                    )
                 }
-            )
+            ) { contentPadding ->
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.padding(contentPadding)
+                ) {
+                    when (mainTab) {
+                        MainTab.DASHBOARD -> DashboardScreen(
+                            session = activeSession,
+                            devices = devices,
+                            isLoading = deviceLoading,
+                            error = watchdogAlert ?: deviceError,
+                            lastSyncedText = formatLastSynced(lastSyncedAt),
+                            onRefresh = { refreshOverview(refreshHardware = true) },
+                            onDeviceClick = { device ->
+                                detailMessage = null
+                                detailWarning = null
+                                detailError = null
+                                screen = Screen.DeviceDetail(device.id)
+                            },
+                            onLogout = ::logout
+                        )
+
+                        MainTab.SETUP -> {
+                            if (canManageHardware(activeSession)) {
+                                DeviceSetupScreen(
+                                    devices = devices,
+                                    cafeId = activeSession.cafeId,
+                                    onConfigurationSaved = { refreshOverview(refreshHardware = true) }
+                                )
+                            } else {
+                                ProfileScreen(session = activeSession, onLogout = ::logout)
+                            }
+                        }
+
+                        MainTab.ACCOUNT -> ProfileScreen(
+                            session = activeSession,
+                            onLogout = ::logout
+                        )
+                    }
+                }
+            }
         }
 
         is Screen.DeviceDetail -> {
@@ -315,7 +515,7 @@ fun NoirPlayboxApp() {
                 onBack = { screen = Screen.Dashboard },
                 onRefresh = { refreshOverview(refreshHardware = true) },
                 onPrepare = {
-                    runDetailAction {
+                    runDetailAction("PREPARE", device.id) {
                         lifecycle.prepare(device.id).second
                     }
                 },
@@ -324,13 +524,13 @@ fun NoirPlayboxApp() {
                     if (preparing == null) {
                         detailError = "PREPARING tidak ditemukan."
                     } else {
-                        runDetailAction {
+                        runDetailAction("CANCEL_PREPARING", device.id) {
                             lifecycle.cancelPreparing(device.id, preparing.id)
                         }
                     }
                 },
                 onStartRental = { pkg: RentalPackage ->
-                    runDetailAction {
+                    runDetailAction("START_RENTAL", device.id) {
                         lifecycle.startRental(
                             deviceId = device.id,
                             preparingId = device.preparing?.id,
@@ -343,7 +543,7 @@ fun NoirPlayboxApp() {
                     if (active == null) {
                         detailError = "Session ACTIVE tidak ditemukan."
                     } else {
-                        runDetailAction {
+                        runDetailAction("ADD_TIME", device.id) {
                             lifecycle.addTime(device.id, active, pkg)
                         }
                     }
@@ -353,7 +553,7 @@ fun NoirPlayboxApp() {
                     if (active == null) {
                         detailError = "Session ACTIVE tidak ditemukan."
                     } else {
-                        runDetailAction {
+                        runDetailAction("STOP_RENTAL", device.id) {
                             lifecycle.stopRental(device.id, active)
                         }
                     }
@@ -363,13 +563,13 @@ fun NoirPlayboxApp() {
                     if (shutdown == null) {
                         detailError = "Shutdown pending tidak ditemukan."
                     } else {
-                        runDetailAction {
+                        runDetailAction("START_SHUTDOWN", device.id) {
                             lifecycle.startShutdown(device.id, shutdown)
                         }
                     }
                 },
                 onRetryShutdownMonitor = {
-                    runDetailAction {
+                    runDetailAction("RETRY_SHUTDOWN_MONITOR", device.id) {
                         lifecycle.retryShutdownMonitor(device.id)
                     }
                 },
@@ -378,18 +578,27 @@ fun NoirPlayboxApp() {
                     if (shutdown == null) {
                         detailError = "Shutdown Mode tidak ditemukan."
                     } else {
-                        runDetailAction {
+                        runDetailAction("FINISH_SHUTDOWN", device.id) {
                             lifecycle.finishShutdown(device.id, shutdown.id)
                         }
                     }
                 },
+                canOpenLocalPilot = canManageHardware(session),
                 onOpenLocalPilot = {
-                    screen = Screen.TinyTuyaPilot(device.id)
+                    if (canManageHardware(session)) {
+                        screen = Screen.TinyTuyaPilot(device.id)
+                    } else {
+                        detailError = "Akun ini tidak memiliki izin untuk Advanced local setup."
+                    }
                 }
             )
         }
 
         is Screen.TinyTuyaPilot -> {
+            if (!canManageHardware(session)) {
+                screen = Screen.Dashboard
+                return
+            }
             TinyTuyaPilotScreen(
                 logicalDeviceId = current.deviceId,
                 onBack = {
@@ -397,6 +606,23 @@ fun NoirPlayboxApp() {
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun NoirBootScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(R.drawable.logo_noir_symbol),
+            contentDescription = "Noir",
+            modifier = Modifier.size(72.dp),
+            contentScale = ContentScale.Fit
+        )
     }
 }
 

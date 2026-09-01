@@ -1,8 +1,12 @@
 package com.noirplaybox.operator.ui.screens
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,25 +14,53 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AccessTime
+import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.ElectricBolt
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Router
+import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.WifiOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noirplaybox.operator.R
@@ -58,104 +90,291 @@ fun DeviceDetailScreen(
     onStartShutdown: () -> Unit,
     onRetryShutdownMonitor: () -> Unit,
     onFinishShutdown: () -> Unit,
+    canOpenLocalPilot: Boolean = true,
     onOpenLocalPilot: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        contentAlignment = Alignment.TopCenter
+    var confirmTitle by remember { mutableStateOf<String?>(null) }
+    var confirmBody by remember { mutableStateOf("") }
+    var confirmLabel by remember { mutableStateOf("Lanjutkan") }
+    var confirmDestructive by remember { mutableStateOf(false) }
+    var confirmAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    fun askConfirmation(
+        title: String,
+        body: String,
+        label: String = "Lanjutkan",
+        destructive: Boolean = false,
+        action: () -> Unit
     ) {
+        if (actionLoading) return
+        confirmTitle = title
+        confirmBody = body
+        confirmLabel = label
+        confirmDestructive = destructive
+        confirmAction = action
+    }
+
+    val dismissConfirmation = {
+        confirmTitle = null
+        confirmBody = ""
+        confirmAction = null
+    }
+
+    confirmTitle?.let { title ->
+        AlertDialog(
+            onDismissRequest = { if (!actionLoading) dismissConfirmation() },
+            title = { Text(title, fontWeight = FontWeight.Bold) },
+            text = { Text(confirmBody, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val action = confirmAction
+                        dismissConfirmation()
+                        action?.invoke()
+                    },
+                    enabled = !actionLoading
+                ) {
+                    Text(
+                        confirmLabel,
+                        color = if (confirmDestructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = dismissConfirmation, enabled = !actionLoading) {
+                    Text("Batal")
+                }
+            },
+            shape = RoundedCornerShape(24.dp)
+        )
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val isTablet = maxWidth >= 720.dp
+
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 1080.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = if (isTablet) 28.dp else 18.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            DetailHeader(device, onBack, onRefresh, actionLoading)
+            Column(modifier = Modifier.fillMaxWidth().widthIn(max = 1040.dp)) {
+                DetailTopBar(
+                    device = device,
+                    actionLoading = actionLoading,
+                    onBack = onBack,
+                    onRefresh = onRefresh
+                )
 
-            Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(16.dp))
 
-            if (actionLoading) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    CircularProgressIndicator()
+                if (actionLoading) {
+                    LoadingActionBanner()
+                    Spacer(Modifier.height(12.dp))
                 }
-                Spacer(Modifier.height(12.dp))
+
+                message?.let { NoticeCard(it, MaterialTheme.colorScheme.primary) }
+                warning?.let { NoticeCard(it, Color(0xFFB56A00)) }
+                error?.let { NoticeCard(it, MaterialTheme.colorScheme.error) }
+
+                if (isTablet) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Column(modifier = Modifier.weight(1.25f)) {
+                            RentalPanel(
+                                device = device,
+                                packages = packages,
+                                actionLoading = actionLoading,
+                                onPrepare = onPrepare,
+                                onCancelPreparing = {
+                                    askConfirmation(
+                                        "Batalkan preparing?",
+                                        "Unit akan kembali ke status Ready dan proses persiapan dibatalkan.",
+                                        "Batalkan Preparing",
+                                        destructive = true,
+                                        action = onCancelPreparing
+                                    )
+                                },
+                                onStartRental = { pkg ->
+                                    askConfirmation(
+                                        "Mulai rental ${pkg.label}?",
+                                        "Billing akan mulai berjalan sebesar ${formatRupiah(pkg.price)}.",
+                                        "Mulai Rental"
+                                    ) { onStartRental(pkg) }
+                                },
+                                onAddTime = { pkg ->
+                                    askConfirmation(
+                                        "Tambah ${pkg.label}?",
+                                        "Waktu dan tagihan rental akan bertambah ${formatRupiah(pkg.price)}.",
+                                        "Tambah Waktu"
+                                    ) { onAddTime(pkg) }
+                                },
+                                onStopRental = {
+                                    askConfirmation(
+                                        "Selesaikan rental?",
+                                        "Billing akan dihentikan dan unit masuk ke proses shutdown.",
+                                        "Selesaikan Rental",
+                                        destructive = true,
+                                        action = onStopRental
+                                    )
+                                },
+                                onStartShutdown = {
+                                    askConfirmation(
+                                        "Mulai shutdown mode?",
+                                        "Billing sudah berhenti. Mode ini memberi waktu operator mematikan PS4 dengan aman.",
+                                        "Mulai Shutdown",
+                                        action = onStartShutdown
+                                    )
+                                },
+                                onRetryShutdownMonitor = onRetryShutdownMonitor,
+                                onFinishShutdown = {
+                                    askConfirmation(
+                                        "Selesaikan shutdown?",
+                                        "Pastikan PS4 sudah benar-benar mati sebelum unit dikembalikan ke Ready.",
+                                        "Selesai Shutdown",
+                                        destructive = true,
+                                        action = onFinishShutdown
+                                    )
+                                }
+                            )
+                        }
+                        Column(modifier = Modifier.weight(0.75f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            HardwareOverview(device)
+                            if (canOpenLocalPilot) {
+                                AdvancedCard(device.id, onOpenLocalPilot)
+                            }
+                        }
+                    }
+                } else {
+                    RentalPanel(
+                        device = device,
+                        packages = packages,
+                        actionLoading = actionLoading,
+                        onPrepare = onPrepare,
+                        onCancelPreparing = {
+                            askConfirmation(
+                                "Batalkan preparing?",
+                                "Unit akan kembali ke status Ready dan proses persiapan dibatalkan.",
+                                "Batalkan Preparing",
+                                destructive = true,
+                                action = onCancelPreparing
+                            )
+                        },
+                        onStartRental = { pkg ->
+                            askConfirmation(
+                                "Mulai rental ${pkg.label}?",
+                                "Billing akan mulai berjalan sebesar ${formatRupiah(pkg.price)}.",
+                                "Mulai Rental"
+                            ) { onStartRental(pkg) }
+                        },
+                        onAddTime = { pkg ->
+                            askConfirmation(
+                                "Tambah ${pkg.label}?",
+                                "Waktu dan tagihan rental akan bertambah ${formatRupiah(pkg.price)}.",
+                                "Tambah Waktu"
+                            ) { onAddTime(pkg) }
+                        },
+                        onStopRental = {
+                            askConfirmation(
+                                "Selesaikan rental?",
+                                "Billing akan dihentikan dan unit masuk ke proses shutdown.",
+                                "Selesaikan Rental",
+                                destructive = true,
+                                action = onStopRental
+                            )
+                        },
+                        onStartShutdown = {
+                            askConfirmation(
+                                "Mulai shutdown mode?",
+                                "Billing sudah berhenti. Mode ini memberi waktu operator mematikan PS4 dengan aman.",
+                                "Mulai Shutdown",
+                                action = onStartShutdown
+                            )
+                        },
+                        onRetryShutdownMonitor = onRetryShutdownMonitor,
+                        onFinishShutdown = {
+                            askConfirmation(
+                                "Selesaikan shutdown?",
+                                "Pastikan PS4 sudah benar-benar mati sebelum unit dikembalikan ke Ready.",
+                                "Selesai Shutdown",
+                                destructive = true,
+                                action = onFinishShutdown
+                            )
+                        }
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    HardwareOverview(device)
+                    if (canOpenLocalPilot) {
+                        Spacer(Modifier.height(14.dp))
+                        AdvancedCard(device.id, onOpenLocalPilot)
+                    }
+                }
+
+                Spacer(Modifier.height(32.dp))
             }
-
-            message?.let { NoticeCard(it, MaterialTheme.colorScheme.primary) }
-            warning?.let { NoticeCard(it, Color(0xFFB45309)) }
-            error?.let { NoticeCard(it, MaterialTheme.colorScheme.error) }
-
-            LifecycleCard(
-                device = device,
-                packages = packages,
-                actionLoading = actionLoading,
-                onPrepare = onPrepare,
-                onCancelPreparing = onCancelPreparing,
-                onStartRental = onStartRental,
-                onAddTime = onAddTime,
-                onStopRental = onStopRental,
-                onStartShutdown = onStartShutdown,
-                onRetryShutdownMonitor = onRetryShutdownMonitor,
-                onFinishShutdown = onFinishShutdown
-            )
-
-            Spacer(Modifier.height(14.dp))
-            HardwareCard(device)
-
-            Spacer(Modifier.height(14.dp))
-            LocalPilotCard(
-                deviceId = device.id,
-                onOpenLocalPilot = onOpenLocalPilot
-            )
-
-            Spacer(Modifier.height(28.dp))
         }
     }
 }
 
 @Composable
-private fun DetailHeader(
+private fun DetailTopBar(
     device: PlayboxDevice,
+    actionLoading: Boolean,
     onBack: () -> Unit,
-    onRefresh: () -> Unit,
-    actionLoading: Boolean
+    onRefresh: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        IconButton(
+            onClick = onBack,
+            enabled = !actionLoading,
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surface)
+                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+        ) {
+            Icon(Icons.Rounded.ArrowBack, contentDescription = "Kembali")
+        }
+
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                "PLAYBOX DETAIL",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary
+                text = device.id,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
             )
-            Text(device.id, fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
             Text(
-                device.name,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = device.name.ifBlank { device.cafeName ?: "PlayBox" },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onRefresh, enabled = !actionLoading) {
-                Text("Refresh")
-            }
-            OutlinedButton(onClick = onBack, enabled = !actionLoading) {
-                Text("Kembali")
-            }
+        DeviceStateBadge(device)
+
+        IconButton(
+            onClick = onRefresh,
+            enabled = !actionLoading,
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh", tint = MaterialTheme.colorScheme.primary)
         }
     }
 }
 
 @Composable
-private fun LifecycleCard(
+private fun RentalPanel(
     device: PlayboxDevice,
     packages: List<RentalPackage>,
     actionLoading: Boolean,
@@ -169,67 +388,54 @@ private fun LifecycleCard(
     onFinishShutdown: () -> Unit
 ) {
     Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(26.dp)),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp)
-        ) {
+        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        lifecycleTitle(device),
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(lifecycleTitle(device), fontSize = 22.sp, fontWeight = FontWeight.Bold)
                     Text(
                         lifecycleSubtitle(device),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
-                StatusPill(device)
             }
 
-            Spacer(Modifier.height(14.dp))
-
-            Image(
-                painter = painterResource(R.drawable.ps4),
-                contentDescription = "PS4",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp),
-                contentScale = ContentScale.Fit
-            )
+            DeviceVisual(device)
 
             when (device.state) {
-                DeviceState.READY -> ReadyActions(actionLoading, onPrepare)
-                DeviceState.OFFLINE -> OfflineActions()
-                DeviceState.PREPARING -> PreparingActions(
-                    device,
-                    packages,
-                    actionLoading,
-                    onStartRental,
-                    onCancelPreparing
+                DeviceState.READY -> ReadyState(actionLoading, onPrepare)
+                DeviceState.OFFLINE -> OfflineState()
+                DeviceState.PREPARING -> PreparingState(
+                    device = device,
+                    packages = packages,
+                    actionLoading = actionLoading,
+                    onStartRental = onStartRental,
+                    onCancelPreparing = onCancelPreparing
                 )
-                DeviceState.ACTIVE -> ActiveActions(
-                    device,
-                    packages,
-                    actionLoading,
-                    onAddTime,
-                    onStopRental
+                DeviceState.ACTIVE -> ActiveState(
+                    device = device,
+                    packages = packages,
+                    actionLoading = actionLoading,
+                    onAddTime = onAddTime,
+                    onStopRental = onStopRental
                 )
-                DeviceState.SHUTDOWN -> ShutdownActions(
-                    device,
-                    actionLoading,
-                    onStartShutdown,
-                    onRetryShutdownMonitor,
-                    onFinishShutdown
+                DeviceState.SHUTDOWN -> ShutdownState(
+                    device = device,
+                    actionLoading = actionLoading,
+                    onStartShutdown = onStartShutdown,
+                    onRetryShutdownMonitor = onRetryShutdownMonitor,
+                    onFinishShutdown = onFinishShutdown
                 )
             }
         }
@@ -237,38 +443,97 @@ private fun LifecycleCard(
 }
 
 @Composable
-private fun ReadyActions(
-    actionLoading: Boolean,
-    onPrepare: () -> Unit
-) {
-    Spacer(Modifier.height(8.dp))
-    Text(
-        "Nyalakan monitor dan catat PREPARING sebelum pelanggan mulai bermain.",
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    Spacer(Modifier.height(16.dp))
-    Button(
-        onClick = onPrepare,
-        enabled = !actionLoading,
+private fun DeviceVisual(device: PlayboxDevice) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(54.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("SIAPKAN RENTAL")
+        Box(
+            modifier = Modifier
+                .size(width = 92.dp, height = 68.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ps4),
+                contentDescription = device.id,
+                modifier = Modifier.fillMaxWidth(0.8f).height(54.dp),
+                contentScale = ContentScale.Fit
+            )
+        }
+
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Connection", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(device.connectionLabel, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Power", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (device.hardware?.status == HardwareStatus.ON) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline
+                            )
+                    )
+                    Text(powerStatus(device), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun OfflineActions() {
-    Spacer(Modifier.height(8.dp))
+private fun ReadyState(actionLoading: Boolean, onPrepare: () -> Unit) {
     Text(
-        "Hardware terdeteksi offline. Cek listrik dan Wi-Fi smart plug sebelum menyiapkan rental.",
-        color = MaterialTheme.colorScheme.error
+        "Unit siap digunakan. Siapkan perangkat sebelum pelanggan mulai bermain.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyMedium
     )
+    Button(
+        onClick = onPrepare,
+        enabled = !actionLoading,
+        modifier = Modifier.fillMaxWidth().height(54.dp)
+    ) {
+        Text("Siapkan Rental")
+    }
 }
 
 @Composable
-private fun PreparingActions(
+private fun OfflineState() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(14.dp)
+    ) {
+        Text(
+            "Perangkat offline. Periksa listrik, Wi-Fi, dan smart plug sebelum memulai rental.",
+            color = MaterialTheme.colorScheme.onErrorContainer
+        )
+    }
+}
+
+@Composable
+private fun PreparingState(
     device: PlayboxDevice,
     packages: List<RentalPackage>,
     actionLoading: Boolean,
@@ -277,77 +542,103 @@ private fun PreparingActions(
 ) {
     val risk = device.preparing?.risk() ?: PreparingRiskLevel.NORMAL
 
-    Spacer(Modifier.height(8.dp))
-    DetailRow("Durasi PREPARING", "${device.preparingMinutes} menit")
-    DetailRow("Billing", "BELUM DIMULAI")
-    DetailRow("Risk", risk.name)
-
-    Spacer(Modifier.height(18.dp))
-    Text("Pilih paket untuk mulai billing", fontWeight = FontWeight.SemiBold)
-    Spacer(Modifier.height(10.dp))
-
-    PackageButtons(
-        packages = packages,
-        actionLoading = actionLoading,
-        actionLabel = "MULAI",
-        onClick = onStartRental
+    StatStrip(
+        items = listOf(
+            "Preparing" to "${device.preparingMinutes} min",
+            "Billing" to "Belum mulai",
+            "Status" to when (risk) {
+                PreparingRiskLevel.WARNING -> "Warning"
+                PreparingRiskLevel.SUSPICIOUS -> "Check"
+                else -> "Normal"
+            }
+        )
     )
 
-    Spacer(Modifier.height(14.dp))
+    SectionLabel("Pilih paket rental")
+    PackageSelector(
+        packages = packages,
+        actionLoading = actionLoading,
+        actionText = "Mulai Rental",
+        helperText = "Pilih durasi dan harga, lalu konfirmasi sebelum billing dimulai.",
+        onSubmit = onStartRental
+    )
+
     OutlinedButton(
         onClick = onCancelPreparing,
         enabled = !actionLoading,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text("BATALKAN PREPARING")
+        Text("Batalkan Preparing")
     }
 }
 
 @Composable
-private fun ActiveActions(
+private fun ActiveState(
     device: PlayboxDevice,
     packages: List<RentalPackage>,
     actionLoading: Boolean,
     onAddTime: (RentalPackage) -> Unit,
     onStopRental: () -> Unit
 ) {
-    Spacer(Modifier.height(6.dp))
-    Text(
-        formatCountdown(device.remainingSeconds),
-        fontSize = 42.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary
-    )
-    Spacer(Modifier.height(4.dp))
-    DetailRow("Total billing", formatRupiah(device.session?.totalPrice ?: 0))
-    DetailRow("Total durasi", "${device.session?.totalMinutes ?: 0} menit")
-
-    Spacer(Modifier.height(18.dp))
-    Text("Tambah waktu", fontWeight = FontWeight.SemiBold)
-    Spacer(Modifier.height(10.dp))
-
-    PackageButtons(
-        packages = packages,
-        actionLoading = actionLoading,
-        actionLabel = "+",
-        onClick = onAddTime
-    )
-
-    Spacer(Modifier.height(16.dp))
-    Button(
-        onClick = onStopRental,
-        enabled = !actionLoading,
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(54.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f))
+            .padding(horizontal = 18.dp, vertical = 20.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Text("STOP SESSION")
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+                Text(
+                    "RENTAL BERJALAN",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                formatCountdown(device.remainingSeconds),
+                fontSize = 44.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                "${device.session?.totalMinutes ?: 0} menit  •  ${formatRupiah(device.session?.totalPrice ?: 0)}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+
+    SectionLabel("Tambah waktu")
+    PackageSelector(
+        packages = packages,
+        actionLoading = actionLoading,
+        actionText = "Tambah Waktu",
+        helperText = "Pilih tambahan durasi terlebih dahulu agar tidak salah menambah billing.",
+        onSubmit = onAddTime
+    )
+
+    OutlinedButton(
+        onClick = onStopRental,
+        enabled = !actionLoading,
+        modifier = Modifier.fillMaxWidth().height(52.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.55f))
+    ) {
+        Text("Selesaikan Rental", fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
-private fun ShutdownActions(
+private fun ShutdownState(
     device: PlayboxDevice,
     actionLoading: Boolean,
     onStartShutdown: () -> Unit,
@@ -356,32 +647,32 @@ private fun ShutdownActions(
 ) {
     val status = device.shutdown?.status.orEmpty()
 
-    Spacer(Modifier.height(8.dp))
     if (status == "SHUTDOWN_PENDING") {
         Text(
-            "Billing sudah selesai. Jalankan Shutdown Mode untuk menyalakan monitor sementara dan matikan PS4 secara normal. Mode ini tidak masuk billing dan bukan PREPARING.",
+            "Billing sudah selesai. Jalankan shutdown mode untuk memberi waktu mematikan PS4 secara normal.",
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(Modifier.height(16.dp))
         Button(
             onClick = onStartShutdown,
             enabled = !actionLoading,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp)
+            modifier = Modifier.fillMaxWidth().height(54.dp)
         ) {
-            Text("MULAI SHUTDOWN MODE")
+            Text("Mulai Shutdown Mode")
         }
     } else {
-        DetailRow("Status", "SHUTDOWN ACTIVE")
-        DetailRow("Durasi", "${device.shutdown?.elapsedMinutes() ?: 0} menit")
-        DetailRow("Billing", "TIDAK BERJALAN")
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "1. Pastikan monitor menyala.\n2. Shutdown PS4 dari menu PS4.\n3. Tunggu PS4 benar-benar mati.\n4. Tekan SELESAI SHUTDOWN.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+        StatStrip(
+            items = listOf(
+                "Mode" to "Shutdown",
+                "Durasi" to "${device.shutdown?.elapsedMinutes() ?: 0} min",
+                "Billing" to "Stop"
+            )
         )
-        Spacer(Modifier.height(16.dp))
+
+        Text(
+            "Matikan PS4 dari menu sistem. Setelah konsol benar-benar mati, selesaikan shutdown mode.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium
+        )
 
         if (device.hardware?.switchOn != true) {
             OutlinedButton(
@@ -389,105 +680,351 @@ private fun ShutdownActions(
                 enabled = !actionLoading,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("NYALAKAN MONITOR LAGI")
+                Text("Nyalakan Monitor Lagi")
             }
-            Spacer(Modifier.height(10.dp))
         }
 
         Button(
             onClick = onFinishShutdown,
             enabled = !actionLoading,
+            modifier = Modifier.fillMaxWidth().height(54.dp)
+        ) {
+            Text("Selesai Shutdown")
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PackageSelector(
+    packages: List<RentalPackage>,
+    actionLoading: Boolean,
+    actionText: String,
+    helperText: String,
+    onSubmit: (RentalPackage) -> Unit
+) {
+    var selected by remember(packages) { mutableStateOf(packages.firstOrNull()) }
+    var showSheet by remember { mutableStateOf(false) }
+
+    if (packages.isEmpty()) {
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(16.dp)
         ) {
-            Text("SELESAI SHUTDOWN")
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Paket rental belum tersedia", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Refresh data atau periksa konfigurasi paket sebelum melanjutkan.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        return
+    }
+
+    if (showSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSheet = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = if (actionText == "Tambah Waktu") "Pilih tambahan waktu" else "Pilih paket rental",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Periksa durasi dan harga sebelum memilih.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+
+                packages.forEach { pkg ->
+                    val isSelected = selected == pkg
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(
+                                if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                            )
+                            .clickable {
+                                selected = pkg
+                                showSheet = false
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        RadioButton(
+                            selected = isSelected,
+                            onClick = {
+                                selected = pkg
+                                showSheet = false
+                            }
+                        )
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(pkg.label, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                formatRupiah(pkg.price),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(18.dp))
+                .clickable(enabled = !actionLoading) { showSheet = true },
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 0.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        selected?.label ?: "Pilih paket",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp
+                    )
+                    Text(
+                        selected?.let { formatRupiah(it.price) } ?: "Belum ada paket dipilih",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = "Buka pilihan paket",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        Text(
+            helperText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Button(
+            onClick = { selected?.let(onSubmit) },
+            enabled = !actionLoading && selected != null,
+            modifier = Modifier.fillMaxWidth().height(52.dp)
+        ) {
+            Text(actionText, fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
 @Composable
-private fun PackageButtons(
-    packages: List<RentalPackage>,
-    actionLoading: Boolean,
-    actionLabel: String,
-    onClick: (RentalPackage) -> Unit
-) {
-    packages.forEach { pkg ->
-        OutlinedButton(
-            onClick = { onClick(pkg) },
-            enabled = !actionLoading,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-        ) {
+private fun LoadingActionBanner() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(20.dp),
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Memproses perintah", fontWeight = FontWeight.SemiBold)
+            Text(
+                "Tunggu sampai status unit diperbarui.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun HardwareOverview(device: PlayboxDevice) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp)),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("$actionLabel ${pkg.label}")
-                Text(formatRupiah(pkg.price), fontWeight = FontWeight.SemiBold)
+                Text("Device Status", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(powerStatus(device), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CompactMetric("Power", "${formatNumber(device.hardware?.powerW ?: 0.0)} W", Modifier.weight(1f))
+                CompactMetric("Voltage", "${formatNumber(device.hardware?.voltageV ?: 0.0)} V", Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CompactMetric("Current", "${formatNumber(device.hardware?.currentMa ?: 0.0)} mA", Modifier.weight(1f))
+                CompactMetric("Transport", device.hardware?.transport?.name?.replace("_", " ") ?: "-", Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun HardwareCard(device: PlayboxDevice) {
-    Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+private fun CompactMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp)
-        ) {
-            Text("Hardware", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                device.connectionLabel,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-            DetailRow(
-                "Switch",
-                when (device.hardware?.status) {
-                    HardwareStatus.ON -> "ON"
-                    HardwareStatus.OFF -> "OFF"
-                    HardwareStatus.OFFLINE -> "OFFLINE"
-                    HardwareStatus.UNKNOWN, null -> "UNKNOWN"
-                }
-            )
-            DetailRow("Power", "${formatNumber(device.hardware?.powerW ?: 0.0)} W")
-            DetailRow("Voltage", "${formatNumber(device.hardware?.voltageV ?: 0.0)} V")
-            DetailRow("Current", "${formatNumber(device.hardware?.currentMa ?: 0.0)} mA")
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun AdvancedCard(deviceId: String, onOpenLocalPilot: () -> Unit) {
+    OutlinedButton(
+        onClick = onOpenLocalPilot,
+        modifier = Modifier.fillMaxWidth().height(50.dp),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Icon(Icons.Rounded.MoreHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text("  Advanced local setup", fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun HardwareLine(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    value: String
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
 @Composable
-private fun StatusPill(device: PlayboxDevice) {
-    val text = when (device.hardware?.status) {
-        HardwareStatus.ON -> "ON"
-        HardwareStatus.OFF -> "OFF"
-        HardwareStatus.OFFLINE -> "OFFLINE"
-        else -> "UNKNOWN"
+private fun HardwareMetric(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+        }
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Text(value, fontWeight = FontWeight.SemiBold)
     }
-    Text(
-        text = text,
-        modifier = Modifier.padding(10.dp),
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+}
+
+@Composable
+private fun StatStrip(items: List<Pair<String, String>>) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items.forEach { (label, value) ->
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(value, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+}
+
+@Composable
+private fun DeviceStateBadge(device: PlayboxDevice) {
+    val text = when (device.state) {
+        DeviceState.READY -> "Ready"
+        DeviceState.PREPARING -> "Preparing"
+        DeviceState.ACTIVE -> "Rental"
+        DeviceState.SHUTDOWN -> "Shutdown"
+        DeviceState.OFFLINE -> "Offline"
+    }
+    val accent = device.state == DeviceState.READY || device.state == DeviceState.ACTIVE
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (accent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 @Composable
 private fun NoticeCard(message: String, accent: Color) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 12.dp),
-        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.08f))
+        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.08f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Text(
             message,
@@ -498,74 +1035,31 @@ private fun NoticeCard(message: String, accent: Color) {
     }
 }
 
-@Composable
-private fun DetailRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 5.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun LocalPilotCard(
-    deviceId: String,
-    onOpenLocalPilot: () -> Unit
-) {
-    Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp)
-        ) {
-            Text(
-                "TinyTuya Local Setup",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "Setup ${deviceId.uppercase()} untuk kontrol langsung lewat LAN. Setelah config disimpan, device ini otomatis memakai TinyTuya lokal.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(14.dp))
-            OutlinedButton(
-                onClick = onOpenLocalPilot,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("BUKA LOCAL SETUP ${deviceId.uppercase()}")
-            }
-        }
-    }
+private fun powerStatus(device: PlayboxDevice): String = when (device.hardware?.status) {
+    HardwareStatus.ON -> "ON"
+    HardwareStatus.OFF -> "OFF"
+    HardwareStatus.OFFLINE -> "Offline"
+    HardwareStatus.UNKNOWN, null -> "Checking"
 }
 
 private fun lifecycleTitle(device: PlayboxDevice): String = when (device.state) {
-    DeviceState.READY -> "READY"
+    DeviceState.READY -> "Ready to Play"
     DeviceState.PREPARING -> when (device.preparing?.risk()) {
-        PreparingRiskLevel.WARNING -> "PREPARING WARNING"
-        PreparingRiskLevel.SUSPICIOUS -> "SUSPICIOUS PREPARING"
-        else -> "PREPARING"
+        PreparingRiskLevel.WARNING -> "Preparing Warning"
+        PreparingRiskLevel.SUSPICIOUS -> "Check Preparing"
+        else -> "Preparing"
     }
-    DeviceState.ACTIVE -> "RENTAL ACTIVE"
-    DeviceState.SHUTDOWN -> device.shutdown?.status ?: "SHUTDOWN"
-    DeviceState.OFFLINE -> "DEVICE OFFLINE"
+    DeviceState.ACTIVE -> "Rental Active"
+    DeviceState.SHUTDOWN -> "Shutdown Mode"
+    DeviceState.OFFLINE -> "Device Offline"
 }
 
 private fun lifecycleSubtitle(device: PlayboxDevice): String = when (device.state) {
     DeviceState.READY -> "Unit siap disiapkan untuk pelanggan"
-    DeviceState.PREPARING -> "Monitor ON, billing belum berjalan"
-    DeviceState.ACTIVE -> "Billing berasal dari Firebase session"
-    DeviceState.SHUTDOWN -> "Mode shutdown tidak dihitung sebagai rental"
-    DeviceState.OFFLINE -> "Cek koneksi hardware"
+    DeviceState.PREPARING -> "Perangkat aktif, billing belum berjalan"
+    DeviceState.ACTIVE -> "Rental sedang berjalan"
+    DeviceState.SHUTDOWN -> "Mode shutdown tidak masuk billing"
+    DeviceState.OFFLINE -> "Periksa koneksi perangkat"
 }
 
 private fun formatCountdown(totalSeconds: Int): String {
@@ -583,6 +1077,6 @@ private fun formatRupiah(value: Int): String {
 
 private fun formatNumber(value: Double): String {
     val formatter = NumberFormat.getNumberInstance(Locale("id", "ID"))
-    formatter.maximumFractionDigits = 2
+    formatter.maximumFractionDigits = 1
     return formatter.format(value)
 }

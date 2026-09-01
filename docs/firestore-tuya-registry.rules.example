@@ -1,0 +1,18 @@
+// Merge this block into your existing Firestore rules.
+// The Android app only needs GET access to one known Tuya Device ID.
+
+match /cafes/{cafeId}/tuyaDevices/{tuyaDeviceId} {
+  function userDoc() {
+    return get(/databases/$(database)/documents/users/$(request.auth.uid));
+  }
+
+  function sameOperationalCafe() {
+    return request.auth != null
+      && userDoc().data.role == "operational"
+      && (userDoc().data.cafeId == cafeId || userDoc().data.cafe_id == cafeId);
+  }
+
+  allow get: if sameOperationalCafe();
+  allow list: if false;
+  allow create, update, delete: if false;
+}

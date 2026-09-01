@@ -24,19 +24,28 @@ class LocalTinyTuyaHardwareController(
 
     override suspend fun readAll(
         deviceIds: List<String>
+    ): Map<String, HardwareSnapshot> = readMany(deviceIds, fast = false)
+
+    override suspend fun readFast(
+        deviceIds: List<String>
+    ): Map<String, HardwareSnapshot> = readMany(deviceIds, fast = true)
+
+    private suspend fun readMany(
+        deviceIds: List<String>,
+        fast: Boolean
     ): Map<String, HardwareSnapshot> = coroutineScope {
         deviceIds
             .map { it.trim().uppercase() }
             .filter { it.isNotBlank() }
             .distinct()
             .map { id ->
-                async { id to readOne(id) }
+                async { id to readOne(id, fast) }
             }
             .awaitAll()
             .toMap()
     }
 
-    private suspend fun readOne(id: String): HardwareSnapshot {
+    private suspend fun readOne(id: String, fast: Boolean): HardwareSnapshot {
         val config = store.load(id)
 
         if (config == null) {
@@ -49,7 +58,7 @@ class LocalTinyTuyaHardwareController(
             )
         }
 
-        val status = bridge.status(config)
+        val status = if (fast) bridge.statusFast(config) else bridge.status(config)
 
         return if (status.ok) {
             HardwareSnapshot(

@@ -43,6 +43,17 @@ class RoutedHardwareController(
         }
     }
 
+    override suspend fun readFast(
+        deviceIds: List<String>
+    ): Map<String, HardwareSnapshot> {
+        val localTargets = deviceIds
+            .map { it.trim().uppercase() }
+            .filter { it.isNotBlank() && isLocalDevice(it) }
+            .distinct()
+
+        return if (localTargets.isEmpty()) emptyMap() else localController.readFast(localTargets)
+    }
+
     override suspend fun monitorOn(deviceId: String) {
         controllerFor(deviceId).monitorOn(deviceId)
     }

@@ -1,5 +1,6 @@
 package com.noirplaybox.operator.data
 
+import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.noirplaybox.operator.BuildConfig
 import com.noirplaybox.operator.util.NoirServerClock
@@ -27,7 +28,9 @@ class NoirApiClient(
         forceRefreshToken: Boolean = false
     ): JSONObject {
         val token = getIdToken(forceRefresh = forceRefreshToken)
+        if (BuildConfig.LOG_VERBOSE) Log.d("NoirApiClient", "$method $path -> $baseUrl")
         val result = executeRequest(path, method, body, token)
+        if (BuildConfig.LOG_VERBOSE) Log.d("NoirApiClient", "$method $path <- HTTP ${result.statusCode}")
 
         if (result.serverDateEpochMs > 0L) {
             NoirServerClock.update(result.serverDateEpochMs)

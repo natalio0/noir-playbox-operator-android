@@ -14,6 +14,12 @@ interface HardwareController {
 
     suspend fun readAll(deviceIds: List<String>): Map<String, HardwareSnapshot>
 
+    /**
+     * Lightweight presence polling. Implementations may skip expensive/cloud targets.
+     * Default keeps backward compatibility.
+     */
+    suspend fun readFast(deviceIds: List<String>): Map<String, HardwareSnapshot> = readAll(deviceIds)
+
     suspend fun monitorOn(deviceId: String)
 
     suspend fun monitorStop(deviceId: String)
