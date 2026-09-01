@@ -1,0 +1,10 @@
+{
+  "files.exclude": {
+    "**/.gradle": true,
+    "**/build": true,
+    "**/.idea": true
+  },
+  "java.configuration.updateBuildConfiguration": "interactive",
+  "terminal.integrated.cwd": "${workspaceFolder}",
+  "editor.formatOnSave": true
+}

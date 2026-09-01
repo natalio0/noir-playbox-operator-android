@@ -1,0 +1,65 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Noir: Run App",
+      "type": "shell",
+      "command": "./scripts/dev-run.sh",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Noir: Start Emulator",
+      "type": "shell",
+      "command": "./scripts/start-emulator.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Noir: Stop Emulator",
+      "type": "shell",
+      "command": "./scripts/stop-emulator.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Noir: Build Debug APK",
+      "type": "shell",
+      "command": "./scripts/build-debug.sh",
+      "problemMatcher": [
+        "$gradle"
+      ]
+    },
+    {
+      "label": "Noir: Install Debug APK",
+      "type": "shell",
+      "command": "./scripts/install-debug.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Noir: Build + Install + Run",
+      "type": "shell",
+      "command": "./scripts/run-android.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Noir: Android Doctor",
+      "type": "shell",
+      "command": "./scripts/android-doctor.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Noir: Setup VS Code Tooling",
+      "type": "shell",
+      "command": "./scripts/setup-vscode.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Noir: Logcat",
+      "type": "shell",
+      "command": "./scripts/logcat-noir.sh",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+app/google-services.json
+
+# === Android / Gradle ===
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+
+# === Firebase local config ===
+app/google-services.json
+
+# === TinyTuya provisioning / secrets ===
+devices.json
+snapshot.json
+tuya-raw.json
+tinytuya.json
+.noir-tinytuya/
+.venv/
+venv/
+
+# === Environment / credentials ===
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*service-account*.json
+*serviceAccount*.json
+credentials.json
+secrets.json
+
+# === Logs / temporary ===
+*.log
+tmp/
+
+# === NOIR PLAYBOX LOCAL/SECRET FILES ===
+# TinyTuya Wizard / LAN provisioning data.
+# These may contain local_key, Tuya API credentials, device metadata, or LAN snapshots.
+devices.json
+snapshot.json
+tuya-raw.json
+tinytuya.json
+
+# Common local secret/config variants.
+devices.local.json
+tinytuya.local.json
+*.local-key.json
+# === END NOIR PLAYBOX LOCAL/SECRET FILES ===
+devices.json
+snapshot.json
+devices.json
+snapshot.json
+
+# TinyTuya local provisioning - NEVER COMMIT
+devices.json
+snapshot.json
+tuya-raw.json
+tinytuya.json
+*.secrets.json
+
+# Firebase local config
+app/google-services.json
+
+# TinyTuya / Tuya provisioning secrets
+devices.json
+snapshot.json
+tuya-raw.json
+tinytuya.json
+
+# Local Python environment
+.noir-tinytuya/
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Android build
+.gradle/
+**/build/
+local.properties

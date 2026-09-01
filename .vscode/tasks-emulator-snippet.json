@@ -1,0 +1,22 @@
+{
+  "tasksToAdd": [
+    {
+      "label": "Noir: Start Emulator",
+      "type": "shell",
+      "command": "./scripts/start-emulator.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Noir: Stop Emulator",
+      "type": "shell",
+      "command": "./scripts/stop-emulator.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Noir: Start Emulator + Build + Install + Run",
+      "type": "shell",
+      "command": "./scripts/dev-run.sh",
+      "problemMatcher": []
+    }
+  ]
+}

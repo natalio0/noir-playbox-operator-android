@@ -1,0 +1,36 @@
+# === Android / Gradle ===
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+
+# === Firebase local config ===
+app/google-services.json
+
+# === TinyTuya provisioning / secrets ===
+devices.json
+snapshot.json
+tuya-raw.json
+tinytuya.json
+.noir-tinytuya/
+.venv/
+venv/
+
+# === Environment / credentials ===
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*service-account*.json
+*serviceAccount*.json
+credentials.json
+secrets.json
+
+# === Logs / temporary ===
+*.log
+tmp/
