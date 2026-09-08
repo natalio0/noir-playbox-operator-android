@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -11,6 +12,14 @@ if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    require(keystorePropertiesFile.exists()) {
+        "keystore.properties tidak ditemukan. Release signing dibatalkan."
+    }
+    keystorePropertiesFile.inputStream().use { load(it) }
+}
+
 android {
     namespace = "com.noirplaybox.operator"
     compileSdk = 35
@@ -19,8 +28,8 @@ android {
         applicationId = "com.noirplaybox.operator"
         minSdk = 26
         targetSdk = 35
-        versionCode = 38
-        versionName = "3.8.0"
+        versionCode = 46
+        versionName = "3.9.4-rc4-hf1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -38,12 +47,24 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file(
+                requireNotNull(keystoreProperties.getProperty("storeFile")) { "storeFile wajib diisi" }
+            )
+            storePassword = requireNotNull(keystoreProperties.getProperty("storePassword")) { "storePassword wajib diisi" }
+            keyAlias = requireNotNull(keystoreProperties.getProperty("keyAlias")) { "keyAlias wajib diisi" }
+            keyPassword = requireNotNull(keystoreProperties.getProperty("keyPassword")) { "keyPassword wajib diisi" }
+        }
+    }
+
     buildTypes {
         debug {
             buildConfigField("boolean", "LOG_VERBOSE", "true")
             buildConfigField("String", "APP_ENVIRONMENT", "\"debug\"")
         }
         release {
+            signingConfig = signingConfigs.getByName("release")
             buildConfigField("boolean", "LOG_VERBOSE", "false")
             buildConfigField("String", "APP_ENVIRONMENT", "\"production\"")
             isMinifyEnabled = false

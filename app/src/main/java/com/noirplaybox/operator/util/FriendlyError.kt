@@ -12,6 +12,8 @@ fun friendlyError(error: Throwable): String {
         error is UnknownHostException || error is ConnectException -> "Backend tidak dapat dijangkau. Periksa koneksi internet."
         error is ApiException && error.statusCode == 401 -> "Sesi login berakhir. Silakan login ulang."
         error is ApiException && error.statusCode == 403 -> "Akun ini tidak memiliki izin untuk aksi tersebut."
+        error is ApiException && error.statusCode == 429 -> "Layanan sedang mencapai batas penggunaan. Data terakhir tetap ditampilkan dan sinkronisasi akan dicoba lagi otomatis."
+        raw.contains("RESOURCE_EXHAUSTED", ignoreCase = true) || raw.contains("daily usage limit", ignoreCase = true) || raw.contains("quota", ignoreCase = true) -> "Layanan sedang mencapai batas penggunaan. Data terakhir tetap ditampilkan dan sinkronisasi akan dicoba lagi otomatis."
         raw.contains("offline", ignoreCase = true) -> "Device offline atau tidak merespons di jaringan lokal."
         raw.contains("timed out", ignoreCase = true) || raw.contains("timeout", ignoreCase = true) -> "Device tidak merespons tepat waktu. Cek daya dan Wi-Fi."
         raw.contains("local key", ignoreCase = true) -> "Local key device belum tersedia atau tidak valid. Buka Devices untuk sinkronisasi ulang."

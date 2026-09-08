@@ -65,8 +65,10 @@ private sealed interface Screen {
     data class TinyTuyaPilot(val deviceId: String) : Screen
 }
 
-private const val BUSINESS_REFRESH_MS = 15_000L
-private const val LOCAL_HARDWARE_POLL_MS = 3_500L
+private const val BUSINESS_REFRESH_MS = 60_000L
+private const val BUSINESS_BACKOFF_MAX_MS = 5 * 60_000L
+private const val LOCAL_HARDWARE_POLL_MS = 2_000L
+private const val LOCAL_HARDWARE_RECOVERY_POLL_MS = 1_000L
 private const val TRANSITIONAL_CLOUD_HARDWARE_REFRESH_MS = 15 * 60_000L
 private const val OFFLINE_WATCHDOG_THRESHOLD = 2
 
@@ -129,8 +131,10 @@ fun NoirPlayboxApp() {
     var deviceError by remember { mutableStateOf<String?>(null) }
     var watchdogAlert by remember { mutableStateOf<String?>(null) }
     var lastSyncedAt by remember { mutableStateOf<Long?>(null) }
+    var businessRefreshDelayMs by remember { mutableStateOf(BUSINESS_REFRESH_MS) }
 
     var detailActionLoading by remember { mutableStateOf(false) }
+    var detailManualRefreshing by remember { mutableStateOf(false) }
     var detailMessage by remember { mutableStateOf<String?>(null) }
     var detailWarning by remember { mutableStateOf<String?>(null) }
     var detailError by remember { mutableStateOf<String?>(null) }
@@ -178,7 +182,18 @@ fun NoirPlayboxApp() {
                 )
                 session?.let { overviewCache.save(it.cafeId, devices) }
                 lastSyncedAt = System.currentTimeMillis()
+                businessRefreshDelayMs = BUSINESS_REFRESH_MS
             } catch (error: Throwable) {
+                val raw = error.message.orEmpty()
+                val pressured = raw.contains("RESOURCE_EXHAUSTED", ignoreCase = true) ||
+                    raw.contains("batas penggunaan", ignoreCase = true) ||
+                    raw.contains("quota", ignoreCase = true) ||
+                    (error is com.noirplaybox.operator.data.ApiException && error.statusCode == 429)
+                if (pressured) {
+                    businessRefreshDelayMs = (businessRefreshDelayMs * 2)
+                        .coerceAtLeast(60_000L)
+                        .coerceAtMost(BUSINESS_BACKOFF_MAX_MS)
+                }
                 deviceError = friendlyError(error)
                 if (screen is Screen.DeviceDetail) {
                     detailError = deviceError
@@ -189,10 +204,10 @@ fun NoirPlayboxApp() {
         }
     }
 
-    suspend fun refreshHardwareOnlyNow() {
+    suspend fun refreshHardwareOnlyNow(targetDeviceId: String? = null) {
         if (devices.isEmpty()) return
         hardwareRefreshMutex.withLock {
-            runCatching { overviewRepository.refreshHardwareOnly(devices) }
+            runCatching { overviewRepository.refreshHardwareOnly(devices, targetDeviceId) }
                 .onSuccess { refreshed ->
                     devices = refreshed
                     evaluateOfflineWatchdog(refreshed)
@@ -210,8 +225,28 @@ fun NoirPlayboxApp() {
         scope.launch { refreshOverviewNow(refreshHardware) }
     }
 
-    fun refreshHardwareFast() {
-        scope.launch { refreshHardwareOnlyNow() }
+    fun refreshHardwareFast(targetDeviceId: String? = null) {
+        scope.launch { refreshHardwareOnlyNow(targetDeviceId) }
+    }
+
+    fun refreshDeviceDetailNow(deviceId: String) {
+        if (detailManualRefreshing) return
+        scope.launch {
+            detailManualRefreshing = true
+            detailError = null
+            try {
+                // Hardware current device first so field feedback feels immediate.
+                refreshHardwareOnlyNow(deviceId)
+                // Business state follows without doing a fleet hardware refresh.
+                refreshOverviewNow(refreshHardware = false)
+                // One final local probe catches state changes during business sync.
+                refreshHardwareOnlyNow(deviceId)
+            } catch (error: Throwable) {
+                detailError = friendlyError(error)
+            } finally {
+                detailManualRefreshing = false
+            }
+        }
     }
 
     fun runDetailAction(
@@ -227,21 +262,37 @@ fun NoirPlayboxApp() {
             detailError = null
             detailMessage = null
             detailWarning = null
-            telemetry.audit(action, deviceId, "STARTED")
+            // Telemetry tidak boleh menambah latency pada tombol rental.
+            scope.launch { telemetry.audit(action, deviceId, "STARTED") }
 
             try {
                 val result = block()
                 detailMessage = result.message
                 detailWarning = result.warning
-                telemetry.audit(action, deviceId, "SUCCESS", result.message)
-                refreshOverviewNow(refreshHardware = true)
+
+                // Critical lifecycle sudah selesai. Lepas loading SEBELUM sinkronisasi UI.
+                detailActionLoading = false
+                actionInFlight.remove(key)
+
+                scope.launch { telemetry.audit(action, deviceId, "SUCCESS", result.message) }
+
+                // Sync hanya business state + hardware device ini di background.
+                // Tidak ada full-fleet hardware refresh di critical path tombol.
+                scope.launch { runCatching { refreshOverviewNow(refreshHardware = false) } }
+                scope.launch { runCatching { refreshHardwareOnlyNow(deviceId) } }
             } catch (error: Throwable) {
                 val friendly = friendlyError(error)
                 detailError = friendly
-                telemetry.audit(action, deviceId, "FAILED", friendly)
-                runCatching { refreshOverviewNow(refreshHardware = true) }
-            } finally {
+
                 detailActionLoading = false
+                actionInFlight.remove(key)
+
+                scope.launch { telemetry.audit(action, deviceId, "FAILED", friendly) }
+                scope.launch { runCatching { refreshOverviewNow(refreshHardware = false) } }
+                scope.launch { runCatching { refreshHardwareOnlyNow(deviceId) } }
+            } finally {
+                // Fallback only: success/error paths above release immediately.
+                if (detailActionLoading) detailActionLoading = false
                 actionInFlight.remove(key)
             }
         }
@@ -302,7 +353,7 @@ fun NoirPlayboxApp() {
         if (session == null || screen is Screen.Login) return@LaunchedEffect
 
         while (true) {
-            delay(BUSINESS_REFRESH_MS)
+            delay(businessRefreshDelayMs)
             refreshOverview(refreshHardware = false)
         }
     }
@@ -317,17 +368,33 @@ fun NoirPlayboxApp() {
         }
     }
 
-    // Fast LAN presence polling while Home is selected. Business state stays on its
-    // own backend cadence; this loop only refreshes physical ON/OFF/OFFLINE state.
+    // Field mode: physical plug/unplug must be visible quickly without spending
+    // Firestore reads. Home polls all TinyTuya LAN devices; Device Detail polls
+    // only the selected unit. If a device is offline, recovery probing becomes
+    // more aggressive until it comes back on the LAN.
     LaunchedEffect(session?.uid, screen, mainTab) {
-        if (session == null || screen !is Screen.Dashboard || mainTab != MainTab.DASHBOARD) {
-            return@LaunchedEffect
+        if (session == null) return@LaunchedEffect
+
+        val targetDeviceId = when (val current = screen) {
+            is Screen.DeviceDetail -> current.deviceId
+            Screen.Dashboard -> if (mainTab == MainTab.DASHBOARD) null else return@LaunchedEffect
+            else -> return@LaunchedEffect
         }
 
-        refreshHardwareOnlyNow()
+        refreshHardwareOnlyNow(targetDeviceId)
         while (true) {
-            delay(LOCAL_HARDWARE_POLL_MS)
-            refreshHardwareOnlyNow()
+            val relevantDevices = if (targetDeviceId == null) {
+                devices
+            } else {
+                devices.filter { it.id.equals(targetDeviceId, ignoreCase = true) }
+            }
+            val recovering = relevantDevices.any {
+                it.hardware?.status == com.noirplaybox.operator.model.HardwareStatus.OFFLINE ||
+                    it.connected.not()
+            }
+
+            delay(if (recovering) LOCAL_HARDWARE_RECOVERY_POLL_MS else LOCAL_HARDWARE_POLL_MS)
+            refreshHardwareOnlyNow(targetDeviceId)
         }
     }
 
@@ -509,11 +576,12 @@ fun NoirPlayboxApp() {
                 device = device,
                 packages = authRepository.packages(),
                 actionLoading = detailActionLoading,
+                refreshLoading = detailManualRefreshing,
                 message = detailMessage,
                 warning = detailWarning,
                 error = detailError,
                 onBack = { screen = Screen.Dashboard },
-                onRefresh = { refreshOverview(refreshHardware = true) },
+                onRefresh = { refreshDeviceDetailNow(device.id) },
                 onPrepare = {
                     runDetailAction("PREPARE", device.id) {
                         lifecycle.prepare(device.id).second

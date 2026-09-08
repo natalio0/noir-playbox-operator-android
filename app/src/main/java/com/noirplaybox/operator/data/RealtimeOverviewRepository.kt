@@ -14,47 +14,94 @@ class RealtimeOverviewRepository(
     private val backend: BackendRuntimeRepository,
     private val hardwareController: HardwareController
 ) {
+    private var registryCache: List<RegistryDevice> = emptyList()
+    private var registryLoadedAtMs: Long = 0L
+
+    companion object {
+        private const val REGISTRY_REFRESH_MS = 15 * 60_000L
+    }
+
     suspend fun refresh(
         previous: List<PlayboxDevice>,
         refreshHardware: Boolean
     ): List<PlayboxDevice> = coroutineScope {
-        val registry = backend.loadRegistry()
-        val ids = registry.map { it.id }
+        val now = System.currentTimeMillis()
+        val includeRegistry = registryCache.isEmpty() ||
+            now - registryLoadedAtMs >= REGISTRY_REFRESH_MS
 
-        val businessDeferred = async {
-            backend.loadAllBusinessRuntime(ids)
-        }
+        val overviewDeferred = async { backend.loadOverview(includeRegistry) }
 
         val hardwareDeferred = async {
             if (refreshHardware) {
+                val ids = if (previous.isNotEmpty()) {
+                    previous.map { it.id }
+                } else {
+                    val overview = overviewDeferred.await()
+                    val freshRegistry = overview.registry ?: registryCache
+                    freshRegistry.map { it.id }
+                }
                 hardwareController.readAll(ids)
             } else {
                 previous.associate { it.id to (it.hardware ?: HardwareSnapshot()) }
             }
         }
 
-        val business = businessDeferred.await()
+        val overview = overviewDeferred.await()
+        overview.registry?.let { fresh ->
+            registryCache = fresh
+            registryLoadedAtMs = now
+        }
+
+        // A cache restored from disk can paint immediately. The repository still
+        // requests registry on its first network refresh, so new/deleted devices
+        // are reconciled without making registry reads every business cycle.
+        val registry = registryCache.ifEmpty {
+            previous.map { device ->
+                RegistryDevice(
+                    id = device.id,
+                    name = device.name,
+                    cafeId = device.cafeId,
+                    cafeName = device.cafeName,
+                    brand = device.brand,
+                    model = device.model,
+                    type = null
+                )
+            }
+        }
+
         val hardware = hardwareDeferred.await()
 
         registry.map { registered ->
             merge(
                 registered = registered,
-                runtime = business[registered.id] ?: BusinessRuntime(),
+                runtime = overview.business[registered.id] ?: BusinessRuntime(),
                 hardware = hardware[registered.id]
             )
         }
     }
 
-
     suspend fun refreshHardwareOnly(
-        previous: List<PlayboxDevice>
+        previous: List<PlayboxDevice>,
+        targetDeviceId: String? = null
     ): List<PlayboxDevice> = coroutineScope {
         if (previous.isEmpty()) return@coroutineScope previous
 
-        val ids = previous.map { it.id }
+        val normalizedTarget = targetDeviceId?.trim()?.uppercase()?.ifBlank { null }
+        val ids = previous
+            .asSequence()
+            .filter { normalizedTarget == null || it.id.uppercase() == normalizedTarget }
+            .map { it.id }
+            .toList()
+
+        if (ids.isEmpty()) return@coroutineScope previous
+
         val hardware = hardwareController.readFast(ids)
 
         previous.map { device ->
+            if (normalizedTarget != null && device.id.uppercase() != normalizedTarget) {
+                return@map device
+            }
+
             val snapshot = hardware[device.id] ?: device.hardware
             val state = when {
                 device.session != null -> DeviceState.ACTIVE
@@ -82,11 +129,6 @@ class RealtimeOverviewRepository(
         runtime: BusinessRuntime,
         hardware: HardwareSnapshot?
     ): PlayboxDevice {
-        /*
-         * Prioritas lifecycle mengikuti source of truth bisnis:
-         * ACTIVE > SHUTDOWN > PREPARING > READY.
-         * Hardware OFFLINE tidak boleh menghapus billing/session Firebase.
-         */
         val state = when {
             runtime.session != null -> DeviceState.ACTIVE
             runtime.shutdown != null -> DeviceState.SHUTDOWN
@@ -94,9 +136,6 @@ class RealtimeOverviewRepository(
             hardware?.status == HardwareStatus.OFFLINE -> DeviceState.OFFLINE
             else -> DeviceState.READY
         }
-
-        val remaining = runtime.session?.remainingSeconds() ?: 0
-        val preparingMinutes = runtime.preparing?.elapsedMinutes() ?: 0
 
         return PlayboxDevice(
             id = registered.id,
@@ -109,8 +148,8 @@ class RealtimeOverviewRepository(
                 com.noirplaybox.operator.model.HardwareTransport.TRANSITIONAL_TUYA_CLOUD -> "Tuya Cloud · transition"
                 null -> "Hardware pending"
             },
-            remainingSeconds = remaining,
-            preparingMinutes = preparingMinutes,
+            remainingSeconds = runtime.session?.remainingSeconds() ?: 0,
+            preparingMinutes = runtime.preparing?.elapsedMinutes() ?: 0,
             hardware = hardware,
             session = runtime.session,
             preparing = runtime.preparing,

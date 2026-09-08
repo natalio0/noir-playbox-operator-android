@@ -5,84 +5,74 @@ import com.noirplaybox.operator.model.BusinessRuntime
 import com.noirplaybox.operator.model.PreparingRuntime
 import com.noirplaybox.operator.model.RegistryDevice
 import com.noirplaybox.operator.model.ShutdownRuntime
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import org.json.JSONObject
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import java.time.Instant
+
+data class OperatorOverviewSnapshot(
+    val registry: List<RegistryDevice>?,
+    val business: Map<String, BusinessRuntime>
+)
 
 class BackendRuntimeRepository(
     private val api: NoirApiClient
 ) {
-    suspend fun loadRegistry(): List<RegistryDevice> {
-        val data = api.get("/api/devices")
-        val devices = data.optJSONArray("devices") ?: return emptyList()
-        val result = mutableListOf<RegistryDevice>()
+    /**
+     * v3.9.2: one HTTP request returns lifecycle state for the whole cafe.
+     * Registry metadata is requested only at boot / periodic registry refresh.
+     */
+    suspend fun loadOverview(includeRegistry: Boolean): OperatorOverviewSnapshot {
+        val suffix = if (includeRegistry) "?includeRegistry=1" else ""
+        val root = api.get("/api/operator/overview$suffix")
 
-        for (index in 0 until devices.length()) {
-            val item = devices.optJSONObject(index) ?: continue
-            val id = item.optString("deviceId", item.optString("id"))
-                .trim()
-                .uppercase()
-            if (id.isBlank()) continue
-
-            result += RegistryDevice(
-                id = id,
-                name = item.optString("name").ifBlank { id },
-                cafeId = item.optString("cafeId"),
-                cafeName = item.nullableString("cafeName"),
-                brand = item.nullableString("brand"),
-                model = item.nullableString("model"),
-                type = item.nullableString("type")
-            )
+        val registry = if (includeRegistry) {
+            val devices = root.optJSONArray("devices")
+            buildList {
+                if (devices != null) {
+                    for (index in 0 until devices.length()) {
+                        val item = devices.optJSONObject(index) ?: continue
+                        val id = item.optString("deviceId", item.optString("id"))
+                            .trim()
+                            .uppercase()
+                        if (id.isBlank()) continue
+                        add(
+                            RegistryDevice(
+                                id = id,
+                                name = item.optString("name").ifBlank { id },
+                                cafeId = item.optString("cafeId"),
+                                cafeName = item.nullableString("cafeName"),
+                                brand = item.nullableString("brand"),
+                                model = item.nullableString("model"),
+                                type = item.nullableString("type")
+                            )
+                        )
+                    }
+                }
+            }.sortedBy { it.id }
+        } else {
+            null
         }
 
-        return result.sortedBy { it.id }
-    }
-
-    suspend fun loadAllBusinessRuntime(
-        deviceIds: List<String>
-    ): Map<String, BusinessRuntime> = coroutineScope {
-        deviceIds.map { rawId ->
-            async {
-                val id = rawId.uppercase()
-                id to loadBusinessRuntime(id)
+        val business = mutableMapOf<String, BusinessRuntime>()
+        val runtimes = root.optJSONArray("runtimes")
+        if (runtimes != null) {
+            for (index in 0 until runtimes.length()) {
+                val item = runtimes.optJSONObject(index) ?: continue
+                val id = item.optString("deviceId").trim().uppercase()
+                if (id.isBlank()) continue
+                business[id] = BusinessRuntime(
+                    session = item.optJSONObject("session")?.let(::parseSession),
+                    preparing = item.optJSONObject("preparing")?.let(::parsePreparing),
+                    shutdown = item.optJSONObject("shutdown")?.let(::parseShutdown)
+                )
             }
-        }.awaitAll().toMap()
+        }
+
+        return OperatorOverviewSnapshot(registry = registry, business = business)
     }
 
-    suspend fun loadBusinessRuntime(deviceId: String): BusinessRuntime = coroutineScope {
-        val encoded = URLEncoder.encode(deviceId, StandardCharsets.UTF_8.toString())
-
-        val sessionDeferred = async {
-            api.get("/api/sessions/active?deviceId=$encoded")
-        }
-        val preparingDeferred = async {
-            api.get("/api/preparing/active?deviceId=$encoded")
-        }
-        val shutdownDeferred = async {
-            api.get("/api/shutdown/active?deviceId=$encoded")
-        }
-
-        val sessionJson = sessionDeferred.await()
-        val preparingJson = preparingDeferred.await()
-        val shutdownJson = shutdownDeferred.await()
-
-        BusinessRuntime(
-            session = parseSession(sessionJson),
-            preparing = parsePreparing(preparingJson),
-            shutdown = parseShutdown(shutdownJson)
-        )
-    }
-
-    private fun parseSession(root: JSONObject): ActiveRentalSession? {
-        if (!root.optBoolean("active")) return null
-        val item = root.optJSONObject("session") ?: return null
+    private fun parseSession(item: JSONObject): ActiveRentalSession? {
         val id = item.optString("id")
         if (id.isBlank()) return null
-
         return ActiveRentalSession(
             id = id,
             deviceId = item.optString("deviceId").uppercase(),
@@ -92,24 +82,18 @@ class BackendRuntimeRepository(
         )
     }
 
-    private fun parsePreparing(root: JSONObject): PreparingRuntime? {
-        if (!root.optBoolean("active")) return null
-        val item = root.optJSONObject("preparing") ?: return null
+    private fun parsePreparing(item: JSONObject): PreparingRuntime? {
         val id = item.optString("id")
         if (id.isBlank()) return null
-
         return PreparingRuntime(
             id = id,
             startedAtEpochMs = parseIso(item.nullableString("startedAt"))
         )
     }
 
-    private fun parseShutdown(root: JSONObject): ShutdownRuntime? {
-        if (!root.optBoolean("active")) return null
-        val item = root.optJSONObject("shutdown") ?: return null
+    private fun parseShutdown(item: JSONObject): ShutdownRuntime? {
         val id = item.optString("id")
         if (id.isBlank()) return null
-
         return ShutdownRuntime(
             id = id,
             status = item.optString("status").ifBlank { "SHUTDOWN_PENDING" },

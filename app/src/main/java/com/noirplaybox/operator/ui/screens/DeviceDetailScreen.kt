@@ -7,15 +7,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -77,6 +81,7 @@ fun DeviceDetailScreen(
     device: PlayboxDevice,
     packages: List<RentalPackage>,
     actionLoading: Boolean,
+    refreshLoading: Boolean,
     message: String?,
     warning: String?,
     error: String?,
@@ -164,6 +169,7 @@ fun DeviceDetailScreen(
                 DetailTopBar(
                     device = device,
                     actionLoading = actionLoading,
+                    refreshLoading = refreshLoading,
                     onBack = onBack,
                     onRefresh = onRefresh
                 )
@@ -325,6 +331,7 @@ fun DeviceDetailScreen(
 private fun DetailTopBar(
     device: PlayboxDevice,
     actionLoading: Boolean,
+    refreshLoading: Boolean,
     onBack: () -> Unit,
     onRefresh: () -> Unit
 ) {
@@ -363,12 +370,23 @@ private fun DetailTopBar(
 
         IconButton(
             onClick = onRefresh,
-            enabled = !actionLoading,
+            enabled = !refreshLoading,
             modifier = Modifier
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh", tint = MaterialTheme.colorScheme.primary)
+            if (refreshLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Icon(
+                    Icons.Rounded.Refresh,
+                    contentDescription = "Refresh device",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
@@ -735,8 +753,8 @@ private fun PackageSelector(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 28.dp),
+                    .fillMaxHeight(0.9f)
+                    .padding(horizontal = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
@@ -751,38 +769,46 @@ private fun PackageSelector(
                 )
                 Spacer(Modifier.height(4.dp))
 
-                packages.forEach { pkg ->
-                    val isSelected = selected == pkg
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(
-                                if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 28.dp)
+                ) {
+                    items(packages) { pkg ->
+                        val isSelected = selected == pkg
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(
+                                    if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                )
+                                .clickable {
+                                    selected = pkg
+                                    showSheet = false
+                                }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = {
+                                    selected = pkg
+                                    showSheet = false
+                                }
                             )
-                            .clickable {
-                                selected = pkg
-                                showSheet = false
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(pkg.label, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    formatRupiah(pkg.price),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        RadioButton(
-                            selected = isSelected,
-                            onClick = {
-                                selected = pkg
-                                showSheet = false
-                            }
-                        )
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(pkg.label, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                formatRupiah(pkg.price),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
                     }
                 }

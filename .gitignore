@@ -99,3 +99,6 @@ keystore.properties
 local.properties
 .env
 .env.*
+
+noir-operator-release.jks
+keystore.properties

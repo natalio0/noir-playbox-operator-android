@@ -25,7 +25,7 @@ class RentalLifecycleCoordinator(
         // Safety invariant: jangan pernah mencatat PREPARING sebelum hardware benar-benar siap.
         hardware.monitorOn(deviceId)
 
-        val snapshot = hardware.readAll(listOf(deviceId))[deviceId.trim().uppercase()]
+        val snapshot = hardware.readFast(listOf(deviceId))[deviceId.trim().uppercase()]
             ?: throw IllegalStateException("Status hardware $deviceId tidak tersedia setelah command ON.")
 
         if (!snapshot.online || snapshot.switchOn != true) {
@@ -77,7 +77,7 @@ class RentalLifecycleCoordinator(
         // Hardware-first: session billing tidak boleh dibuat sebelum relay benar-benar siap.
         hardware.startRentalTimer(deviceId, rentalPackage.durationMinutes)
 
-        val snapshot = hardware.readAll(listOf(deviceId))[deviceId.trim().uppercase()]
+        val snapshot = hardware.readFast(listOf(deviceId))[deviceId.trim().uppercase()]
             ?: run {
                 runCatchingSuspend { hardware.monitorStop(deviceId) }
                 throw IllegalStateException(
@@ -193,7 +193,7 @@ class RentalLifecycleCoordinator(
         // Jangan pernah mengembalikan unit ke READY sebelum relay benar-benar OFF.
         hardware.monitorStop(deviceId)
 
-        val snapshot = hardware.readAll(listOf(deviceId))[deviceId.trim().uppercase()]
+        val snapshot = hardware.readFast(listOf(deviceId))[deviceId.trim().uppercase()]
             ?: throw IllegalStateException(
                 "Status hardware $deviceId tidak tersedia setelah command OFF. Shutdown belum diselesaikan."
             )

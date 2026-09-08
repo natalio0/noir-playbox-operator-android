@@ -6,10 +6,22 @@ import com.noirplaybox.operator.model.RentalPackage
 import com.noirplaybox.operator.model.SessionPackage
 import com.noirplaybox.operator.model.ShutdownRuntime
 import org.json.JSONObject
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class RentalLifecycleRepository(
     private val api: NoirApiClient
 ) {
+    // Key dipertahankan sampai backend mengonfirmasi sukses. Jika request timeout
+    // setelah commit di server, retry operator akan memakai key yang sama.
+    private val pendingIdempotencyKeys = ConcurrentHashMap<String, String>()
+
+    private fun idempotencyKey(scope: String): String =
+        pendingIdempotencyKeys.getOrPut(scope) { UUID.randomUUID().toString() }
+
+    private fun clearIdempotencyKey(scope: String) {
+        pendingIdempotencyKeys.remove(scope)
+    }
     suspend fun startPreparing(deviceId: String): PreparingRuntime {
         val data = api.request(
             path = "/api/preparing/start",
@@ -37,9 +49,11 @@ class RentalLifecycleRepository(
         preparingId: String?,
         rentalPackage: RentalPackage
     ): CreatedSessionResult {
+        val scope = "START:${deviceId.uppercase()}:${preparingId.orEmpty()}:${rentalPackage.id}"
         val body = JSONObject()
             .put("deviceId", deviceId.uppercase())
             .put("preparingId", preparingId ?: JSONObject.NULL)
+            .put("idempotencyKey", idempotencyKey(scope))
             .put("packageId", rentalPackage.id)
             .put("durationMinutes", rentalPackage.durationMinutes)
             .put("packageName", rentalPackage.label)
@@ -54,11 +68,13 @@ class RentalLifecycleRepository(
         val sessionJson = data.optJSONObject("session")
             ?: throw IllegalStateException("Response session tidak lengkap.")
 
-        return CreatedSessionResult(
+        val result = CreatedSessionResult(
             session = parseSession(sessionJson),
             packageItem = data.optJSONObject("package")?.let(::parseSessionPackage),
             preparingConverted = data.optBoolean("preparingConverted")
         )
+        clearIdempotencyKey(scope)
+        return result
     }
 
     suspend fun addPackage(
@@ -66,8 +82,10 @@ class RentalLifecycleRepository(
         deviceId: String,
         rentalPackage: RentalPackage
     ): AddedPackageResult {
+        val scope = "ADD:${sessionId}:${rentalPackage.id}"
         val body = JSONObject()
             .put("deviceId", deviceId.uppercase())
+            .put("idempotencyKey", idempotencyKey(scope))
             .put("packageId", rentalPackage.id)
             .put("name", rentalPackage.label)
             .put("durationMinutes", rentalPackage.durationMinutes)
@@ -84,11 +102,13 @@ class RentalLifecycleRepository(
         val packageJson = data.optJSONObject("package")
             ?: throw IllegalStateException("Package ADD TIME tidak ditemukan.")
 
-        return AddedPackageResult(
+        val result = AddedPackageResult(
             totalMinutes = session.optInt("totalMinutes", 0),
             totalPrice = session.optInt("totalPrice", 0),
             packageItem = parseSessionPackage(packageJson)
         )
+        clearIdempotencyKey(scope)
+        return result
     }
 
     suspend fun completeSession(
