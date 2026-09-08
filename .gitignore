@@ -102,3 +102,4 @@ local.properties
 
 noir-operator-release.jks
 keystore.properties
+release-artifacts/
