@@ -92,11 +92,9 @@ fun DeviceSetupScreen(
         selectedLan = lan
         if (entry != null) {
             localKey = entry.localKey
-            entry.logicalDeviceId?.takeIf { it.isNotBlank() }?.let { logical ->
-                if (devices.any { it.id.equals(logical, ignoreCase = true) }) {
-                    selectedLogicalId = logical.uppercase()
-                }
-            }
+            // Pairing target stays exactly as selected by the operator.
+            // Registry logicalDeviceId is intentionally ignored here to avoid
+            // cross-pairing between logical PlayBox units.
             entry.switchDps?.let { switchDps = it.toString() }
             message = "Local key ${lan.name} siap dari Noir backend."
             error = null
@@ -116,7 +114,7 @@ fun DeviceSetupScreen(
                 registry.find(cafeId, lan.id) ?: registry.resolveFromCloud(
                     cafeId = cafeId,
                     tuyaDeviceId = lan.id,
-                    logicalDeviceId = selectedLogicalId.takeIf { it.isNotBlank() },
+                    logicalDeviceId = null,
                     protocolVersion = lan.protocolVersion,
                     ipAddress = lan.ipAddress
                 )
@@ -227,7 +225,7 @@ fun DeviceSetupScreen(
                                                     registry.find(cafeId, lan.id) ?: registry.resolveFromCloud(
                                                         cafeId = cafeId,
                                                         tuyaDeviceId = lan.id,
-                                                        logicalDeviceId = selectedLogicalId.takeIf { it.isNotBlank() },
+                                                        logicalDeviceId = null,
                                                         protocolVersion = lan.protocolVersion,
                                                         ipAddress = lan.ipAddress
                                                     )
@@ -357,26 +355,94 @@ fun DeviceSetupScreen(
                         onLocalKeyChange = { localKey = it },
                         onDpsChange = { switchDps = it.filter(Char::isDigit) },
                         onSave = {
-                            runCatching {
-                                require(selectedLogicalId.isNotBlank()) { "PlayBox ID wajib dipilih." }
-                                require(localKey.isNotBlank()) { "Local key belum tersedia." }
-                                val registryEntry = registryEntries[lan.id]
-                                val config = TinyTuyaLocalConfig(
-                                    logicalDeviceId = selectedLogicalId.trim(),
-                                    tuyaDeviceId = lan.id,
-                                    ipAddress = lan.ipAddress,
-                                    localKey = localKey.trim(),
-                                    protocolVersion = (registryEntry?.protocolVersion ?: lan.protocolVersion)
+                            scope.launch {
+                                runCatching {
+                                    require(selectedLogicalId.isNotBlank()) { "PlayBox ID wajib dipilih." }
+                                    require(localKey.isNotBlank()) { "Local key belum tersedia." }
+
+                                    val registryEntry = registryEntries[lan.id]
+                                    val protocol = lan.protocolVersion
                                         .takeIf { it in setOf("3.1", "3.2", "3.3", "3.4", "3.5") }
-                                        ?: "3.3",
-                                    switchDps = switchDps.toIntOrNull() ?: registryEntry?.switchDps ?: 1
-                                )
-                                store.save(config)
-                            }.onSuccess {
-                                message = "${selectedLogicalId.uppercase()} berhasil dihubungkan dan key disimpan terenkripsi di perangkat."
-                                error = null
-                                onConfigurationSaved()
-                            }.onFailure { error = it.message ?: "Konfigurasi gagal disimpan." }
+                                        ?: registryEntry?.protocolVersion
+                                            ?.takeIf { it in setOf("3.1", "3.2", "3.3", "3.4", "3.5") }
+                                        ?: "3.3"
+
+                                    val config = TinyTuyaLocalConfig(
+                                        logicalDeviceId = selectedLogicalId.trim().uppercase(),
+                                        tuyaDeviceId = lan.id,
+                                        ipAddress = lan.ipAddress,
+                                        localKey = localKey.trim(),
+                                        protocolVersion = protocol,
+                                        switchDps = switchDps.toIntOrNull() ?: registryEntry?.switchDps ?: 1
+                                    )
+
+                                    message = "Testing ${lan.ipAddress} • ${lan.id} • v$protocol..."
+                                    error = null
+
+                                    val firstStatus = bridge.status(config)
+                                    val verifiedConfig = if (firstStatus.ok) {
+                                        config
+                                    } else {
+                                        val reason = firstStatus.error.orEmpty().lowercase()
+                                        val looksLikeKeyOrVersion =
+                                            reason.contains("key") ||
+                                            reason.contains("version") ||
+                                            reason.contains("914") ||
+                                            reason.contains("905")
+
+                                        require(looksLikeKeyOrVersion) {
+                                            firstStatus.error ?: "TinyTuya test gagal. Config lama tidak diubah."
+                                        }
+
+                                        message = "Key registry ditolak device • refresh Tuya Cloud..."
+
+                                        val refreshedEntry = registry.resolveFromCloud(
+                                            cafeId = cafeId,
+                                            tuyaDeviceId = lan.id,
+                                            logicalDeviceId = selectedLogicalId.trim(),
+                                            protocolVersion = protocol,
+                                            ipAddress = lan.ipAddress,
+                                            forceRefresh = true
+                                        )
+
+                                        registryEntries[lan.id] = refreshedEntry
+                                        localKey = refreshedEntry.localKey
+
+                                        val refreshedProtocol = lan.protocolVersion
+                                            .takeIf { it in setOf("3.1", "3.2", "3.3", "3.4", "3.5") }
+                                            ?: refreshedEntry.protocolVersion
+                                                ?.takeIf { it in setOf("3.1", "3.2", "3.3", "3.4", "3.5") }
+                                            ?: protocol
+
+                                        val retryConfig = config.copy(
+                                            localKey = refreshedEntry.localKey.trim(),
+                                            protocolVersion = refreshedProtocol,
+                                            switchDps = refreshedEntry.switchDps ?: config.switchDps
+                                        )
+
+                                        val retryStatus = bridge.status(retryConfig)
+                                        require(retryStatus.ok) {
+                                            (retryStatus.error ?: "Key terbaru dari Tuya Cloud masih ditolak device.") +
+                                                " • Config lama tidak diubah."
+                                        }
+
+                                        retryConfig
+                                    }
+
+                                    store.save(verifiedConfig)
+                                    verifiedConfig
+                                }.onSuccess { config ->
+                                    message =
+                                        "${config.logicalDeviceId} VERIFIED • ${config.ipAddress} • v${config.protocolVersion}. " +
+                                        "Local key VERIFIED dan baru kemudian disimpan."
+                                    error = null
+                                    onConfigurationSaved()
+                                }.onFailure { throwable ->
+                                    message = null
+                                    error = (throwable.message ?: "Konfigurasi gagal dites.") +
+                                        " • Config lama tetap aman dan tidak ditimpa."
+                                }
+                            }
                         },
                         modifier = Modifier.fillMaxWidth().widthIn(max = maxContent)
                     )

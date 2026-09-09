@@ -28,8 +28,8 @@ android {
         applicationId = "com.noirplaybox.operator"
         minSdk = 26
         targetSdk = 35
-        versionCode = 46
-        versionName = "3.9.4-rc4-hf1"
+        versionCode = 62
+        versionName = "3.12.6-stale-key-refresh"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -117,6 +117,7 @@ dependencies {
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.activity:activity-compose:1.10.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.6")
     implementation("androidx.compose.ui:ui:1.7.8")
     implementation("androidx.compose.ui:ui-tooling-preview:1.7.8")
     implementation("androidx.compose.foundation:foundation:1.7.8")

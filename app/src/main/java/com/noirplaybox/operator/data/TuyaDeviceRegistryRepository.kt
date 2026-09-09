@@ -58,7 +58,8 @@ class TuyaDeviceRegistryRepository(
         tuyaDeviceId: String,
         logicalDeviceId: String?,
         protocolVersion: String?,
-        ipAddress: String?
+        ipAddress: String?,
+        forceRefresh: Boolean = false
     ): TuyaRegistryEntry {
         require(cafeId.isNotBlank()) { "Cafe ID tidak tersedia." }
         require(tuyaDeviceId.isNotBlank()) { "Tuya Device ID kosong." }
@@ -70,8 +71,9 @@ class TuyaDeviceRegistryRepository(
         logicalDeviceId?.takeIf { it.isNotBlank() }?.let { body.put("logicalDeviceId", it) }
         protocolVersion?.takeIf { it.isNotBlank() }?.let { body.put("protocolVersion", it) }
         ipAddress?.takeIf { it.isNotBlank() }?.let { body.put("ipAddress", it) }
+        if (forceRefresh) body.put("forceRefresh", true)
 
-        Log.d("NoirTuyaRegistry", "Backend registry lookup for $tuyaDeviceId / cafe=$cafeId")
+        Log.d("NoirTuyaRegistry", "Backend registry lookup for $tuyaDeviceId / cafe=$cafeId forceRefresh=$forceRefresh")
         val response = try {
             api.request(
                 path = "/api/tuya/local-key",
