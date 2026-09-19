@@ -1,8 +1,10 @@
 package com.noirplaybox.operator.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -10,8 +12,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Dashboard
-import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material.icons.rounded.SettingsRemote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,7 +25,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 internal enum class MainTab { DASHBOARD, SETUP, PAYMENT, ACCOUNT }
@@ -37,15 +38,16 @@ internal fun AppBottomBar(
     Surface(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
-        shadowElevation = 8.dp
+        shadowElevation = 6.dp
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            BottomItem(
+            NavItem(
                 selected = selected == MainTab.DASHBOARD,
                 icon = Icons.Rounded.Dashboard,
                 label = "Home",
@@ -53,7 +55,7 @@ internal fun AppBottomBar(
                 modifier = Modifier.weight(1f)
             )
             if (allowDeviceSetup) {
-                BottomItem(
+                NavItem(
                     selected = selected == MainTab.SETUP,
                     icon = Icons.Rounded.SettingsRemote,
                     label = "Devices",
@@ -61,14 +63,14 @@ internal fun AppBottomBar(
                     modifier = Modifier.weight(1f)
                 )
             }
-            BottomItem(
+            NavItem(
                 selected = selected == MainTab.PAYMENT,
                 icon = Icons.Rounded.Payments,
                 label = "Payment",
                 onClick = { onSelect(MainTab.PAYMENT) },
                 modifier = Modifier.weight(1f)
             )
-            BottomItem(
+            NavItem(
                 selected = selected == MainTab.ACCOUNT,
                 icon = Icons.Rounded.Person,
                 label = "Account",
@@ -80,40 +82,50 @@ internal fun AppBottomBar(
 }
 
 @Composable
-private fun BottomItem(
+private fun NavItem(
     selected: Boolean,
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
+    Row(
         modifier = modifier
-            .padding(horizontal = 3.dp)
+            .border(
+                width = 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
+                shape = RoundedCornerShape(18.dp)
+            )
             .background(
-                if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f)
-                else Color.Transparent,
-                RoundedCornerShape(18.dp)
+                color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f) else Color.Transparent,
+                shape = RoundedCornerShape(18.dp)
             )
             .clickable(onClick = onClick)
-            .padding(vertical = 9.dp, horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            modifier = Modifier.size(22.dp),
-            tint = if (selected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .background(
+                    if (selected) MaterialTheme.colorScheme.surface else Color.Transparent,
+                    RoundedCornerShape(999.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                modifier = Modifier.size(18.dp),
+                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Text(
-            text = label,
-            maxLines = 1,
-            overflow = TextOverflow.Clip,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurfaceVariant
+            text = if (selected) "  $label" else label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

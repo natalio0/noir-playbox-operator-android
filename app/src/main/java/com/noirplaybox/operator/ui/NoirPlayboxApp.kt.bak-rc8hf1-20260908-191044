@@ -73,7 +73,6 @@ private const val LOCAL_HARDWARE_POLL_MS = 2_000L
 private const val LOCAL_HARDWARE_RECOVERY_POLL_MS = 1_000L
 private const val TRANSITIONAL_CLOUD_HARDWARE_REFRESH_MS = 15 * 60_000L
 private const val OFFLINE_WATCHDOG_THRESHOLD = 2
-private const val HARDWARE_UI_OFFLINE_THRESHOLD = 3
 
 @Composable
 fun NoirPlayboxApp() {
@@ -121,7 +120,6 @@ fun NoirPlayboxApp() {
     val expiryInFlight = remember { mutableSetOf<String>() }
     val actionInFlight = remember { mutableSetOf<String>() }
     val offlineStreaks = remember { mutableMapOf<String, Int>() }
-    val hardwareUiOfflineStreaks = remember { mutableMapOf<String, Int>() }
     val reportedOfflineSessions = remember { mutableSetOf<String>() }
 
     var screen by remember { mutableStateOf<Screen>(Screen.Boot) }
@@ -214,45 +212,8 @@ fun NoirPlayboxApp() {
         hardwareRefreshMutex.withLock {
             runCatching { overviewRepository.refreshHardwareOnly(devices, targetDeviceId) }
                 .onSuccess { refreshed ->
-                    val previousById = devices.associateBy { it.id.uppercase() }
-
-                    val stabilized = refreshed.map { candidate ->
-                        val key = candidate.id.uppercase()
-                        val previous = previousById[key]
-
-                        val isOfflineSample =
-                            candidate.hardware?.online == false ||
-                            candidate.hardware?.status == com.noirplaybox.operator.model.HardwareStatus.OFFLINE
-
-                        if (!isOfflineSample) {
-                            hardwareUiOfflineStreaks.remove(key)
-                            candidate
-                        } else {
-                            val streak = (hardwareUiOfflineStreaks[key] ?: 0) + 1
-                            hardwareUiOfflineStreaks[key] = streak
-
-                            val previousWasHealthy =
-                                previous != null &&
-                                previous.hardware?.online != false &&
-                                previous.hardware?.status != com.noirplaybox.operator.model.HardwareStatus.OFFLINE
-
-                            if (previousWasHealthy && streak < HARDWARE_UI_OFFLINE_THRESHOLD) {
-                                // Transient LAN miss: keep the last healthy hardware presentation.
-                                // Business/runtime fields from candidate remain fresh.
-                                candidate.copy(
-                                    state = previous.state,
-                                    connected = previous.connected,
-                                    connectionLabel = previous.connectionLabel,
-                                    hardware = previous.hardware
-                                )
-                            } else {
-                                candidate
-                            }
-                        }
-                    }
-
-                    devices = stabilized
-                    evaluateOfflineWatchdog(stabilized)
+                    devices = refreshed
+                    evaluateOfflineWatchdog(refreshed)
                     session?.let { overviewCache.save(it.cafeId, devices) }
                     lastSyncedAt = System.currentTimeMillis()
                 }

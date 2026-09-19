@@ -121,7 +121,7 @@ class RentalLifecycleCoordinator(
         val currentCountdown = activeSession.remainingSeconds()
 
         // Firebase adalah source of truth: commit billing lebih dulu.
-        val added = backend.addPackage(
+        backend.addPackage(
             sessionId = activeSession.id,
             deviceId = deviceId,
             rentalPackage = rentalPackage
@@ -139,9 +139,7 @@ class RentalLifecycleCoordinator(
             message = "${rentalPackage.label} berhasil ditambahkan ke billing.",
             warning = if (hardwareSync.isFailure) {
                 "Billing sudah bertambah, tetapi timer hardware belum tersinkron."
-            } else null,
-            updatedTotalMinutes = added.totalMinutes,
-            updatedTotalPrice = added.totalPrice
+            } else null
         )
     }
 

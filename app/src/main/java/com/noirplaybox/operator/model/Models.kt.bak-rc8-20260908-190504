@@ -159,7 +159,5 @@ data class SessionPackage(
 
 data class LifecycleActionResult(
     val message: String,
-    val warning: String? = null,
-    val updatedTotalMinutes: Int? = null,
-    val updatedTotalPrice: Int? = null
+    val warning: String? = null
 )

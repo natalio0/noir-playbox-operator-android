@@ -692,15 +692,7 @@ private fun ShutdownState(
             style = MaterialTheme.typography.bodyMedium
         )
 
-        val shutdownStartedAt = device.shutdown?.startedAtEpochMs
-        val retryGracePassed = shutdownStartedAt == null ||
-            (System.currentTimeMillis() - shutdownStartedAt) >= 5_000L
-        val canRetryMonitor =
-            device.hardware?.online == true &&
-            device.hardware.switchOn == false &&
-            retryGracePassed
-
-        if (canRetryMonitor) {
+        if (device.hardware?.switchOn != true) {
             OutlinedButton(
                 onClick = onRetryShutdownMonitor,
                 enabled = !actionLoading,
