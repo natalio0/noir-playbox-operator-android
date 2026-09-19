@@ -54,8 +54,8 @@ fun PageHeader(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Image(
-                    painter = painterResource(R.drawable.logo_noir_symbol),
-                    contentDescription = "Noir",
+                    painter = painterResource(R.drawable.logo_kagoengan_studio),
+                    contentDescription = "Kagoengan Studio Playbox",
                     modifier = Modifier
                         .size(42.dp)
                         .clip(RoundedCornerShape(14.dp))

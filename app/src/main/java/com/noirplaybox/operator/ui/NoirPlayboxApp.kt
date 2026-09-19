@@ -119,6 +119,7 @@ fun NoirPlayboxApp() {
     val refreshMutex = remember { Mutex() }
     val hardwareRefreshMutex = remember { Mutex() }
     val expiryInFlight = remember { mutableSetOf<String>() }
+    val preparingWatchdogInFlight = remember { mutableSetOf<String>() }
     val actionInFlight = remember { mutableSetOf<String>() }
     val offlineStreaks = remember { mutableMapOf<String, Int>() }
     val hardwareUiOfflineStreaks = remember { mutableMapOf<String, Int>() }
@@ -491,6 +492,7 @@ fun NoirPlayboxApp() {
             delay(1_000L)
             val now = NoirServerClock.nowEpochMs()
             val expired = mutableListOf<Pair<String, com.noirplaybox.operator.model.ActiveRentalSession>>()
+            val stalePreparing = mutableListOf<Pair<String, com.noirplaybox.operator.model.PreparingRuntime>>()
 
             devices = devices.map { device ->
                 val active = device.session
@@ -499,10 +501,33 @@ fun NoirPlayboxApp() {
                     expired += device.id to active
                 }
 
+                val preparingMinutes = device.preparing?.elapsedMinutes(now) ?: 0
+                if (device.session == null && device.preparing != null && preparingMinutes >= 60) {
+                    stalePreparing += device.id to device.preparing
+                }
+
                 device.copy(
                     remainingSeconds = remaining,
-                    preparingMinutes = device.preparing?.elapsedMinutes(now) ?: 0
+                    preparingMinutes = preparingMinutes
                 )
+            }
+
+            stalePreparing.forEach { (deviceId, preparing) ->
+                if (!preparingWatchdogInFlight.add(preparing.id)) return@forEach
+
+                scope.launch {
+                    try {
+                        val result = lifecycle.cancelPreparing(deviceId, preparing.id)
+                        watchdogAlert = "PREPARING $deviceId melewati 60 menit. Monitor dimatikan otomatis."
+                        detailMessage = result.message
+                        detailWarning = result.warning
+                        refreshOverviewNow(refreshHardware = true)
+                    } catch (error: Throwable) {
+                        detailError = friendlyError(error)
+                    } finally {
+                        preparingWatchdogInFlight.remove(preparing.id)
+                    }
+                }
             }
 
             expired.forEach { (deviceId, active) ->
@@ -756,8 +781,8 @@ private fun NoirBootScreen() {
         contentAlignment = Alignment.Center
     ) {
         Image(
-            painter = painterResource(R.drawable.logo_noir_symbol),
-            contentDescription = "Noir",
+            painter = painterResource(R.drawable.logo_kagoengan_studio),
+            contentDescription = "Kagoengan Studio Playbox",
             modifier = Modifier.size(72.dp),
             contentScale = ContentScale.Fit
         )

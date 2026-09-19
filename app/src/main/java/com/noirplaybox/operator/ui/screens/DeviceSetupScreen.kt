@@ -59,6 +59,9 @@ import com.noirplaybox.operator.hardware.TinyTuyaDiscoveredDevice
 import com.noirplaybox.operator.hardware.TinyTuyaLocalConfig
 import com.noirplaybox.operator.hardware.TinyTuyaSecureStore
 import com.noirplaybox.operator.model.PlayboxDevice
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 @Composable
@@ -96,12 +99,12 @@ fun DeviceSetupScreen(
             // Registry logicalDeviceId is intentionally ignored here to avoid
             // cross-pairing between logical PlayBox units.
             entry.switchDps?.let { switchDps = it.toString() }
-            message = "Local key ${lan.name} siap dari Noir backend."
+            message = "Local key ${lan.name} siap dari Kagoengan backend."
             error = null
         } else {
             localKey = ""
             message = null
-            error = "Local key ${lan.id} belum tersedia dari Noir backend. Input manual tetap tersedia sebagai fallback."
+            error = "Local key ${lan.id} belum tersedia dari Kagoengan backend. Input manual tetap tersedia sebagai fallback."
         }
     }
 
@@ -186,7 +189,7 @@ fun DeviceSetupScreen(
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text("Self-service device pairing", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                 Text(
-                                    "Cafe: $cafeId • registry aman via Noir backend",
+                                    "Cafe: $cafeId • registry aman via Kagoengan backend",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 2,
@@ -212,24 +215,33 @@ fun DeviceSetupScreen(
                                 error = null
                                 message = null
                                 scope.launch {
-                                    bridge.scan(12).onSuccess { found ->
+                                    bridge.scan(5).onSuccess { found ->
                                         scanned = found
                                         if (found.isEmpty()) {
                                             message = "Tidak ada device Tuya ditemukan di jaringan."
                                         } else {
+                                            registryLoadingId = "batch"
+                                            val results = coroutineScope {
+                                                found.map { lan ->
+                                                    async {
+                                                        lan to runCatching {
+                                                            registry.find(cafeId, lan.id) ?: registry.resolveFromCloud(
+                                                                cafeId = cafeId,
+                                                                tuyaDeviceId = lan.id,
+                                                                logicalDeviceId = null,
+                                                                protocolVersion = lan.protocolVersion,
+                                                                ipAddress = lan.ipAddress
+                                                            )
+                                                        }
+                                                    }
+                                                }.awaitAll()
+                                            }
+
                                             var matched = 0
                                             var failed = 0
-                                            found.forEach { lan ->
-                                                registryLoadingId = lan.id
-                                                runCatching {
-                                                    registry.find(cafeId, lan.id) ?: registry.resolveFromCloud(
-                                                        cafeId = cafeId,
-                                                        tuyaDeviceId = lan.id,
-                                                        logicalDeviceId = null,
-                                                        protocolVersion = lan.protocolVersion,
-                                                        ipAddress = lan.ipAddress
-                                                    )
-                                                }.onSuccess { entry ->
+                                            var firstError: String? = null
+                                            results.forEach { (lan, result) ->
+                                                result.onSuccess { entry ->
                                                     registryEntries[lan.id] = entry
                                                     registryMissing.remove(lan.id)
                                                     matched += 1
@@ -237,7 +249,9 @@ fun DeviceSetupScreen(
                                                     registryEntries.remove(lan.id)
                                                     registryMissing[lan.id] = true
                                                     failed += 1
-                                                    error = "${lan.name}: ${throwable.message ?: "local key belum tersedia"}"
+                                                    if (firstError == null) {
+                                                        firstError = "${lan.name}: ${throwable.message ?: "local key belum tersedia"}"
+                                                    }
                                                 }
                                             }
                                             registryLoadingId = null
@@ -246,7 +260,7 @@ fun DeviceSetupScreen(
                                             } else {
                                                 "${found.size} device ditemukan • belum ada local key yang berhasil di-resolve."
                                             }
-                                            if (failed == 0) error = null
+                                            error = if (failed > 0) firstError else null
                                         }
                                     }.onFailure { error = it.message ?: "Scan gagal." }
                                     scanning = false
@@ -301,7 +315,7 @@ fun DeviceSetupScreen(
                 item {
                     SectionTitle(
                         title = "Discovered devices",
-                        subtitle = "Pilih plug • Noir backend cek registry lalu sinkron ke Tuya Cloud bila perlu",
+                        subtitle = "Pilih plug • Kagoengan backend cek registry lalu sinkron ke Tuya Cloud bila perlu",
                         modifier = Modifier.fillMaxWidth().widthIn(max = maxContent)
                     )
                 }
@@ -540,9 +554,9 @@ private fun DiscoveredDeviceRow(
                 Text("${item.ipAddress} • ${item.id}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     when {
-                        keyAvailable -> "Noir Registry • key ready"
+                        keyAvailable -> "Kagoengan Registry • key ready"
                         checkedMissing -> "Registry key unavailable"
-                        else -> "Checking Noir registry"
+                        else -> "Checking Kagoengan registry"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (keyAvailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -596,7 +610,7 @@ private fun PairingPanel(
                         Icon(Icons.Rounded.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Local key ready", fontWeight = FontWeight.SemiBold)
-                            Text("Diambil aman melalui Noir backend. Setelah disimpan, key berada di secure storage perangkat.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Diambil aman melalui Kagoengan backend. Setelah disimpan, key berada di secure storage perangkat.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }

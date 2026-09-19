@@ -35,7 +35,7 @@ class TinyTuyaBridge(
         call("library_info")
     }
 
-    suspend fun scan(seconds: Int = 12): Result<List<TinyTuyaDiscoveredDevice>> = withContext(Dispatchers.IO) {
+    suspend fun scan(seconds: Int = 5): Result<List<TinyTuyaDiscoveredDevice>> = withContext(Dispatchers.IO) {
         val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         val multicastLock = wifi?.createMulticastLock("noir-tinytuya-scan")?.apply { setReferenceCounted(false) }
         try {

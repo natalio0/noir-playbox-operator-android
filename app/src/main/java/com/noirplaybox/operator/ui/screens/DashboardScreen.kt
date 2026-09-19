@@ -195,8 +195,8 @@ private fun MinimalTopBar(
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Image(
-            painter = painterResource(R.drawable.logo_noir_symbol),
-            contentDescription = "Noir",
+            painter = painterResource(R.drawable.logo_kagoengan_studio),
+            contentDescription = "Kagoengan Studio Playbox",
             modifier = Modifier
                 .size(if (isTablet) 52.dp else 46.dp)
                 .clip(RoundedCornerShape(14.dp)),
@@ -205,7 +205,7 @@ private fun MinimalTopBar(
 
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(
-                text = "NOIR OPERATOR",
+                text = "KAGOENGAN STUDIO PLAYBOX",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold

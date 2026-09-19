@@ -87,8 +87,8 @@ fun LoginScreen(
                 verticalArrangement = Arrangement.Center
             ) {
                 Image(
-                    painter = painterResource(R.drawable.logo_noir_symbol),
-                    contentDescription = "Noir Playbox",
+                    painter = painterResource(R.drawable.logo_kagoengan_studio),
+                    contentDescription = "Kagoengan Studio Playbox",
                     modifier = Modifier
                         .size(76.dp)
                         .clip(RoundedCornerShape(22.dp)),
@@ -98,7 +98,7 @@ fun LoginScreen(
                 Spacer(Modifier.height(18.dp))
 
                 Text(
-                    text = "NOIR OPERATOR",
+                    text = "KAGOENGAN STUDIO PLAYBOX",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
@@ -109,7 +109,7 @@ fun LoginScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Sign in to manage your PlayBox units.",
+                    text = "Sign in to manage your Playbox units.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
@@ -144,20 +144,20 @@ private fun BrandingPanel(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.Center
     ) {
         Image(
-            painter = painterResource(R.drawable.logo_noir_symbol),
-            contentDescription = "Noir Playbox",
+            painter = painterResource(R.drawable.logo_kagoengan_studio),
+            contentDescription = "Kagoengan Studio Playbox",
             modifier = Modifier.size(96.dp),
             contentScale = ContentScale.Fit
         )
         Spacer(Modifier.height(26.dp))
         Text(
-            text = "NOIR OPERATOR",
+            text = "KAGOENGAN STUDIO PLAYBOX",
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.labelLarge
         )
         Text(
-            text = "Run every PlayBox from one place.",
+            text = "Run every Playbox from one place.",
             fontSize = 34.sp,
             fontWeight = FontWeight.Bold,
             lineHeight = 40.sp
@@ -197,7 +197,7 @@ private fun LoginForm(
             if (showHeading) {
                 Text("Sign in", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "Use your Noir Operator account.",
+                    "Use your Kagoengan Studio Playbox account.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(2.dp))

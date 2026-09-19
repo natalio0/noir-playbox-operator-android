@@ -345,13 +345,14 @@ class FirebaseOperationalRepository(
         auth?.signOut()
     }
 
-    fun packages(): List<RentalPackage> = listOf(
-        RentalPackage("1h", "1 Jam", 60, 12_000),
-        RentalPackage("2h", "2 Jam", 120, 22_000),
-        RentalPackage("3h", "3 Jam", 180, 30_000),
-        RentalPackage("5h", "5 Jam", 300, 45_000),
-        RentalPackage("10h", "10 Jam", 600, 80_000),
-    )
+    fun packages(): List<RentalPackage> = (1..10).map { hours ->
+        RentalPackage(
+            id = "${hours}h",
+            label = "$hours Jam",
+            durationMinutes = hours * 60,
+            price = hours * 12_000
+        )
+    }
 
     private fun firstString(
         document: DocumentSnapshot,

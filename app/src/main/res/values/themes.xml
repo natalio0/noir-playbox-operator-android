@@ -10,7 +10,7 @@
 
     <style name="Theme.NoirPlaybox.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">#FFFFFF</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_noir_symbol</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_kagoengan_studio_inset</item>
         <item name="postSplashScreenTheme">@style/Theme.NoirPlaybox</item>
     </style>
 </resources>

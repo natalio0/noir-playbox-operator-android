@@ -96,8 +96,8 @@ fun ProfileScreen(session: OperatorSession, onLogout: () -> Unit) {
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Image(
-                            painter = painterResource(R.drawable.logo_noir_symbol),
-                            contentDescription = "Noir",
+                            painter = painterResource(R.drawable.logo_kagoengan_studio),
+                            contentDescription = "Kagoengan Studio Playbox",
                             modifier = Modifier
                                 .size(56.dp)
                                 .clip(RoundedCornerShape(18.dp))
@@ -106,7 +106,7 @@ fun ProfileScreen(session: OperatorSession, onLogout: () -> Unit) {
                         )
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                text = session.displayName.ifBlank { "Noir Operator" },
+                                text = session.displayName.ifBlank { "Kagoengan Studio Playbox" },
                                 fontSize = 22.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
